@@ -162,8 +162,6 @@ def _resolve_device(hass: HomeAssistant, device_id: str) -> tuple[Any, Any, str,
         raise HomeAssistantError(f"vSphere config entry '{entry_id}' is not loaded")
 
     client = entry_data.get("client")
-    resolver = entry_data.get("coordinator") and entry_data.get("resolver")
-    # resolver may be stored directly on entry_data
     resolver = entry_data.get("resolver")
 
     if client is None:

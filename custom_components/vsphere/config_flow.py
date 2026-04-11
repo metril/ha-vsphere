@@ -531,10 +531,12 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
 
         if user_input is not None:
             restrictions = {
-                "block_destructive": user_input.get("block_destructive", False),
-                "block_snapshots": user_input.get("block_snapshots", False),
-                "block_migrate": user_input.get("block_migrate", False),
-                "block_host_ops": user_input.get("block_host_ops", False),
+                "global": {
+                    "destructive": user_input.get("block_destructive", False),
+                    "snapshots": user_input.get("block_snapshots", False),
+                    "migrate": user_input.get("block_migrate", False),
+                    "host_ops": user_input.get("block_host_ops", False),
+                }
             }
             return self.async_create_entry(
                 data={
@@ -546,23 +548,24 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
                 }
             )
 
+        global_restrictions: dict[str, Any] = current_restrictions.get("global", {})
         data_schema = vol.Schema(
             {
                 vol.Required(
                     "block_destructive",
-                    default=current_restrictions.get("block_destructive", False),
+                    default=global_restrictions.get("destructive", False),
                 ): BooleanSelector(),
                 vol.Required(
                     "block_snapshots",
-                    default=current_restrictions.get("block_snapshots", False),
+                    default=global_restrictions.get("snapshots", False),
                 ): BooleanSelector(),
                 vol.Required(
                     "block_migrate",
-                    default=current_restrictions.get("block_migrate", False),
+                    default=global_restrictions.get("migrate", False),
                 ): BooleanSelector(),
                 vol.Required(
                     "block_host_ops",
-                    default=current_restrictions.get("block_host_ops", False),
+                    default=global_restrictions.get("host_ops", False),
                 ): BooleanSelector(),
             }
         )

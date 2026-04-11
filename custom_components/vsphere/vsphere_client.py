@@ -1135,55 +1135,68 @@ class VSphereClient:
     # PropertyCollector support (EventListener)
     # ------------------------------------------------------------------
 
-    def create_property_filter(
-        self,
-        categories: list[str],
-        entity_filter: dict[str, Any],
-    ) -> tuple[Any, Any]:
-        """Create a PropertyCollector filter for the EventListener.
+    def _get_category_type_info(self, category: str, categories: dict[str, bool]) -> tuple[Any, list[str]] | None:
+        """Return (vim_type, property_paths) for a category, or None if not applicable."""
+        host_props = [
+            "summary.config.name",
+            "summary.runtime.powerState",
+            "summary.runtime.inMaintenanceMode",
+            "summary.quickStats.uptime",
+            "summary.quickStats.overallCpuUsage",
+            "summary.quickStats.overallMemoryUsage",
+            "summary.hardware.cpuMhz",
+            "summary.hardware.numCpuCores",
+            "summary.hardware.memorySize",
+            "summary.config.product.version",
+            "summary.config.product.build",
+            "config.powerSystemInfo.currentPolicy.shortName",
+            "capability.shutdownSupported",
+            "vm",
+        ]
 
-        Args:
-            categories: List of category names to monitor.
-            entity_filter: Entity filter configuration dict.
+        vm_props = [
+            "summary.config.name",
+            "summary.config.numCpu",
+            "summary.config.memorySizeMB",
+            "summary.config.uuid",
+            "summary.config.guestFullName",
+            "summary.runtime.powerState",
+            "summary.overallStatus",
+            "summary.quickStats.overallCpuUsage",
+            "summary.quickStats.hostMemoryUsage",
+            "summary.quickStats.guestMemoryUsage",
+            "summary.quickStats.uptimeSeconds",
+            "summary.guest.toolsStatus",
+            "summary.guest.ipAddress",
+            "summary.guest.guestFullName",
+            "summary.storage.committed",
+            "runtime.host",
+            "runtime.powerState",
+            "runtime.maxCpuUsage",
+            "snapshot",
+            "configStatus",
+        ]
 
-        Returns:
-            Tuple of (property_collector, filter_obj).
-        """
-        conn = self._push_conn
-        if conn is None:
-            raise VSphereConnectionError("Push connection not established; call connect_push() first")
-
-        content = conn.RetrieveContent()
-        pc = content.propertyCollector
-
-        # Build object specs based on categories
-        obj_specs: list[Any] = []
-        filter_spec = vmodl.query.PropertyCollector.FilterSpec()
-        prop_specs: list[Any] = []
-
-        # Build base property lists for each watchable category
-        host_props = ["summary.runtime.powerState", "summary.config.name"]
-        vm_props = ["summary.runtime.powerState", "summary.config.name", "runtime.powerState"]
-
-        # If events/alarms monitoring is on, also watch triggeredAlarmState on hosts and VMs
+        # Add alarm properties if events_alarms is enabled
         if categories.get("events_alarms"):
-            if "triggeredAlarmState" not in host_props:
-                host_props = [*host_props, "triggeredAlarmState"]
-            if "triggeredAlarmState" not in vm_props:
-                vm_props = [*vm_props, "triggeredAlarmState"]
+            if category == "hosts":
+                host_props.append("triggeredAlarmState")
+            elif category == "vms":
+                vm_props.append("triggeredAlarmState")
 
-        type_map: dict[str, tuple[Any, list[str]]] = {
-            "hosts": (
-                vim.HostSystem,
-                host_props,
-            ),
-            "vms": (
-                vim.VirtualMachine,
-                vm_props,
-            ),
+        mapping: dict[str, tuple[Any, list[str]]] = {
+            "hosts": (vim.HostSystem, host_props),
+            "vms": (vim.VirtualMachine, vm_props),
             "datastores": (
                 vim.Datastore,
-                ["summary.accessible", "summary.freeSpace"],
+                [
+                    "summary.name",
+                    "summary.type",
+                    "summary.capacity",
+                    "summary.freeSpace",
+                    "host",
+                    "vm",
+                ],
             ),
             "clusters": (
                 vim.ClusterComputeResource,
@@ -1213,60 +1226,95 @@ class VSphereClient:
             ),
         }
 
-        # Also include hosts/vms with only triggeredAlarmState when events_alarms is on
-        # but those categories are not being watched — tracked in type_map above via the
-        # dynamically extended host_props/vm_props lists.
+        # events_alarms is not a separate object type — alarms piggyback on hosts/vms
+        if category == "events_alarms":
+            return None
 
-        for category in categories:
-            if category not in type_map:
+        return mapping.get(category)
+
+    def create_property_filter(
+        self,
+        categories: dict[str, bool],
+        entity_filter: dict[str, Any],  # noqa: ARG002  # reserved for future per-object filtering
+    ) -> tuple[Any, Any]:
+        """Create a PropertyCollector filter for the EventListener.
+
+        Uses ContainerView for each object type so the traversal is fully
+        recursive regardless of inventory depth.
+
+        Args:
+            categories: Mapping of category name → enabled bool.
+            entity_filter: Entity filter configuration dict (reserved for future use).
+
+        Returns:
+            Tuple of (property_collector, filter_obj).
+        """
+        conn = self._push_conn
+        if conn is None:
+            raise VSphereConnectionError("Push connection not established; call connect_push() first")
+
+        content = conn.RetrieveContent()
+        pc = content.propertyCollector
+
+        obj_specs: list[Any] = []
+        prop_specs: list[Any] = []
+
+        # Collect categories to watch, adding hosts/vms when events_alarms is on
+        # even if those categories are not explicitly enabled.
+        watch_categories: dict[str, bool] = dict(categories)
+        if categories.get("events_alarms"):
+            watch_categories.setdefault("hosts", True)
+            watch_categories.setdefault("vms", True)
+
+        for category, enabled in watch_categories.items():
+            if not enabled:
                 continue
-            obj_type, props = type_map[category]
+            type_info = self._get_category_type_info(category, categories)
+            if type_info is None:
+                continue
 
-            traversal_spec = vmodl.query.PropertyCollector.TraversalSpec()
-            traversal_spec.name = f"traversal_{category}"
-            traversal_spec.type = vim.Folder
-            traversal_spec.path = "childEntity"
-            traversal_spec.skip = False
+            obj_type, properties = type_info
 
-            obj_spec = vmodl.query.PropertyCollector.ObjectSpec()
-            obj_spec.obj = content.rootFolder
-            obj_spec.skip = True
-            obj_spec.selectSet = [traversal_spec]
+            # Create a ContainerView for this object type — fully recursive
+            container = content.viewManager.CreateContainerView(
+                content.rootFolder,
+                [obj_type],
+                True,  # recursive=True
+            )
+
+            # Traversal spec: ContainerView → view (its contents)
+            traversal = vmodl.query.PropertyCollector.TraversalSpec(
+                name=f"traverse_{obj_type.__name__}",
+                type=vim.view.ContainerView,
+                path="view",
+                skip=False,
+            )
+
+            # Object spec: start at the container, skip it, traverse into its contents
+            obj_spec = vmodl.query.PropertyCollector.ObjectSpec(
+                obj=container,
+                skip=True,
+                selectSet=[traversal],
+            )
             obj_specs.append(obj_spec)
 
-            prop_spec = vmodl.query.PropertyCollector.PropertySpec()
-            prop_spec.type = obj_type
-            prop_spec.all = False
-            prop_spec.pathSet = props
+            # Property spec: what properties to watch on the target objects
+            prop_spec = vmodl.query.PropertyCollector.PropertySpec(
+                type=obj_type,
+                pathSet=properties,
+                all=False,
+            )
             prop_specs.append(prop_spec)
 
-        # When events_alarms is enabled but hosts/vms are not in categories,
-        # add them with just triggeredAlarmState so alarm changes are still watched.
-        if categories.get("events_alarms"):
-            for category, obj_type in [("hosts", vim.HostSystem), ("vms", vim.VirtualMachine)]:
-                if not categories.get(category):
-                    traversal_spec = vmodl.query.PropertyCollector.TraversalSpec()
-                    traversal_spec.name = f"traversal_{category}_alarms"
-                    traversal_spec.type = vim.Folder
-                    traversal_spec.path = "childEntity"
-                    traversal_spec.skip = False
+        if not prop_specs:
+            raise VSphereConnectionError("No properties to watch — enable at least one monitoring category")
 
-                    obj_spec = vmodl.query.PropertyCollector.ObjectSpec()
-                    obj_spec.obj = content.rootFolder
-                    obj_spec.skip = True
-                    obj_spec.selectSet = [traversal_spec]
-                    obj_specs.append(obj_spec)
+        filter_spec = vmodl.query.PropertyCollector.FilterSpec(
+            objectSet=obj_specs,
+            propSet=prop_specs,
+        )
 
-                    prop_spec = vmodl.query.PropertyCollector.PropertySpec()
-                    prop_spec.type = obj_type
-                    prop_spec.all = False
-                    prop_spec.pathSet = ["triggeredAlarmState"]
-                    prop_specs.append(prop_spec)
-
-        filter_spec.objectSet = obj_specs
-        filter_spec.propSet = prop_specs
-
-        filter_obj = pc.CreateFilter(spec=filter_spec, partialUpdates=False)
+        filter_obj = pc.CreateFilter(filter_spec, partialUpdates=True)
         return pc, filter_obj
 
     # ------------------------------------------------------------------

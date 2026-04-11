@@ -50,6 +50,8 @@ class VSphereEventListener:
         self._pc: Any = None
         self._pc_filter: Any = None
         self._event_baseline_time: float = 0.0
+        # Local alarm state cache — written/read only on the background thread
+        self._alarm_cache: dict[str, list[dict[str, Any]]] = {}
 
     def start(self) -> None:
         """Start listener (called from executor). Connects, fetches initial data, starts loop."""
@@ -308,15 +310,12 @@ class VSphereEventListener:
                 except Exception:  # noqa: BLE001
                     _LOGGER.debug("Failed to parse alarm state for %s", moref, exc_info=True)
 
-        # Get previous alarm states for change detection
-        old_alarms = self._vsphere_data._data.get("alarms", {}).get(moref, [])  # noqa: SLF001
+        # Get previous alarm states from local cache (thread-safe — no coordinator read)
+        old_alarms = self._alarm_cache.get(moref, [])
         old_statuses = {a.get("alarm_key"): a.get("status") for a in old_alarms}
 
-        # Look up entity name from coordinator data
-        category = f"{entity_type}s"  # "host" → "hosts", "vm" → "vms"
-        entity_name: str = (
-            self._vsphere_data._data.get(category, {}).get(moref, {}).get("name", moref)  # noqa: SLF001
-        )
+        # Entity name: use moref as a safe fallback (no cross-thread coordinator read)
+        entity_name: str = moref
 
         # Fire events for changed alarms — skip first-seen (no prior record) to avoid
         # spurious events on initial load
@@ -342,7 +341,10 @@ class VSphereEventListener:
                     },
                 )
 
-        # Update coordinator alarms data
+        # Update local cache (this thread is the sole writer)
+        self._alarm_cache[moref] = alarms
+
+        # Push to coordinator via the event loop
         self._hass.loop.call_soon_threadsafe(self._update_alarms, moref, alarms)
 
     def _update_alarms(self, moref: str, alarms: list[dict[str, Any]]) -> None:

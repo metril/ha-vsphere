@@ -118,9 +118,18 @@ class VSpherePerfCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._client = client
         self._vsphere_data = vsphere_data
+        # Moref snapshots — captured on the event loop before executor dispatch
+        self._host_morefs: set[str] = set()
+        self._vm_morefs: set[str] = set()
+        self._ds_morefs: set[str] = set()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch performance data and push it into VSphereData."""
+        # Capture morefs on the event loop (thread-safe) before dispatching to executor
+        self._host_morefs = set(self._vsphere_data._data.get("hosts", {}).keys())  # noqa: SLF001
+        self._vm_morefs = set(self._vsphere_data._data.get("vms", {}).keys())  # noqa: SLF001
+        self._ds_morefs = set(self._vsphere_data._data.get("datastores", {}).keys())  # noqa: SLF001
+
         try:
             perf_data: dict[str, Any] = await self.hass.async_add_executor_job(self._fetch_performance)
             self._vsphere_data.update_perf(perf_data)
@@ -132,12 +141,12 @@ class VSpherePerfCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(str(err)) from err
 
     def _fetch_performance(self) -> dict[str, Any]:
-        """Fetch performance data from PerformanceManager."""
+        """Fetch performance data from PerformanceManager (runs in executor)."""
         self._client.ensure_poll_connection()
 
-        # Get morefs of currently monitored objects from VSphereData
-        host_morefs = list(self._vsphere_data._data.get("hosts", {}).keys())  # noqa: SLF001
-        vm_morefs = list(self._vsphere_data._data.get("vms", {}).keys())  # noqa: SLF001
-        ds_morefs = list(self._vsphere_data._data.get("datastores", {}).keys())  # noqa: SLF001
+        # Use the moref snapshots captured on the event loop — thread-safe
+        host_morefs = list(self._host_morefs)
+        vm_morefs = list(self._vm_morefs)
+        ds_morefs = list(self._ds_morefs)
 
         return self._client.query_performance(host_morefs, vm_morefs, ds_morefs)
