@@ -299,6 +299,152 @@ LICENSE_SENSORS: tuple[VSphereSensorDescription, ...] = (
 )
 
 # ---------------------------------------------------------------------------
+# Cluster sensors
+# ---------------------------------------------------------------------------
+
+CLUSTER_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="drs_automation_level",
+        translation_key="drs_automation_level",
+        name="DRS Automation Level",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.get("drs_automation_level"),
+    ),
+    VSphereSensorDescription(
+        key="total_hosts",
+        translation_key="total_hosts",
+        name="Total Hosts",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("total_hosts"),
+    ),
+    VSphereSensorDescription(
+        key="effective_hosts",
+        translation_key="effective_hosts",
+        name="Effective Hosts",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("effective_hosts"),
+    ),
+    VSphereSensorDescription(
+        key="total_cpu_mhz",
+        translation_key="total_cpu_mhz",
+        name="Total CPU",
+        native_unit_of_measurement="MHz",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("total_cpu_mhz"),
+    ),
+    VSphereSensorDescription(
+        key="total_memory_mb",
+        translation_key="total_memory_mb",
+        name="Total Memory",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("total_memory_mb"),
+    ),
+    VSphereSensorDescription(
+        key="vm_count",
+        translation_key="vm_count",
+        name="VM Count",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("vm_count"),
+    ),
+)
+
+# ---------------------------------------------------------------------------
+# Network sensors (split by network object type)
+# ---------------------------------------------------------------------------
+
+VSWITCH_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="num_ports",
+        translation_key="num_ports",
+        name="Port Count",
+        icon="mdi:ethernet",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("num_ports"),
+    ),
+    VSphereSensorDescription(
+        key="mtu",
+        translation_key="mtu",
+        name="MTU",
+        icon="mdi:resize",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.get("mtu"),
+    ),
+)
+
+PNIC_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="speed_mbps",
+        translation_key="speed_mbps",
+        name="Link Speed",
+        native_unit_of_measurement="Mbit/s",
+        icon="mdi:speedometer",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("speed_mbps"),
+    ),
+)
+
+PORTGROUP_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="vlan_id",
+        translation_key="vlan_id",
+        name="VLAN ID",
+        icon="mdi:lan",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.get("vlan_id"),
+    ),
+)
+
+# ---------------------------------------------------------------------------
+# Resource pool sensors
+# ---------------------------------------------------------------------------
+
+RESOURCE_POOL_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="cpu_reservation_mhz",
+        translation_key="cpu_reservation_mhz",
+        name="CPU Reservation",
+        native_unit_of_measurement="MHz",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("cpu_reservation_mhz"),
+    ),
+    VSphereSensorDescription(
+        key="cpu_limit_mhz",
+        translation_key="cpu_limit_mhz",
+        name="CPU Limit",
+        native_unit_of_measurement="MHz",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("cpu_limit_mhz"),
+    ),
+    VSphereSensorDescription(
+        key="memory_reservation_mb",
+        translation_key="memory_reservation_mb",
+        name="Memory Reservation",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("memory_reservation_mb"),
+    ),
+    VSphereSensorDescription(
+        key="memory_limit_mb",
+        translation_key="memory_limit_mb",
+        name="Memory Limit",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("memory_limit_mb"),
+    ),
+    VSphereSensorDescription(
+        key="vm_count",
+        translation_key="vm_count",
+        name="VM Count",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("vm_count"),
+    ),
+)
+
+# ---------------------------------------------------------------------------
 # Sensor map: category → (descriptions, coordinator data key)
 # ---------------------------------------------------------------------------
 
@@ -307,6 +453,8 @@ SENSOR_MAP: dict[str, tuple[tuple[VSphereSensorDescription, ...], str]] = {
     "vms": (VM_SENSORS, "vms"),
     "datastores": (DATASTORE_SENSORS, "datastores"),
     "licenses": (LICENSE_SENSORS, "licenses"),
+    "clusters": (CLUSTER_SENSORS, "clusters"),
+    "resource_pools": (RESOURCE_POOL_SENSORS, "resource_pools"),
 }
 
 
@@ -333,6 +481,29 @@ async def async_setup_entry(
                         coordinator=coordinator,
                         entry=entry,
                         object_type=data_key,
+                        moref=moref,
+                        name=name,
+                        description=description,
+                    )
+                )
+
+    # Network sensors: mixed types require per-type description sets
+    if categories.get("network"):
+        _network_type_map: dict[str, tuple[VSphereSensorDescription, ...]] = {
+            "vswitch": VSWITCH_SENSORS,
+            "pnic": PNIC_SENSORS,
+            "portgroup": PORTGROUP_SENSORS,
+        }
+        for moref, obj_data in coordinator.data.get("networks", {}).items():
+            net_type = obj_data.get("type", "")
+            type_descriptions = _network_type_map.get(net_type, ())
+            name = obj_data.get("name", moref)
+            for description in type_descriptions:
+                entities.append(
+                    VSphereSensor(
+                        coordinator=coordinator,
+                        entry=entry,
+                        object_type="networks",
                         moref=moref,
                         name=name,
                         description=description,

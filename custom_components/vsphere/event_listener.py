@@ -87,14 +87,25 @@ class VSphereEventListener:
             initial_data["datastores"] = self._apply_filter(self._client.get_datastores(), Category.DATASTORES)
         if self._categories.get(Category.LICENSES):
             initial_data["licenses"] = self._client.get_licenses()
+        if self._categories.get(Category.CLUSTERS):
+            initial_data["clusters"] = self._apply_filter(self._client.get_clusters(), Category.CLUSTERS)
+        if self._categories.get(Category.NETWORK):
+            initial_data["networks"] = self._client.get_networks()
+        if self._categories.get(Category.RESOURCE_POOLS):
+            initial_data["resource_pools"] = self._apply_filter(
+                self._client.get_resource_pools(), Category.RESOURCE_POOLS
+            )
 
         self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
         _LOGGER.info(
-            "Initial fetch: %d hosts, %d VMs, %d datastores, %d licenses",
+            "Initial fetch: %d hosts, %d VMs, %d datastores, %d licenses, %d clusters, %d networks, %d resource_pools",
             len(initial_data.get("hosts", {})),
             len(initial_data.get("vms", {})),
             len(initial_data.get("datastores", {})),
             len(initial_data.get("licenses", {})),
+            len(initial_data.get("clusters", {})),
+            len(initial_data.get("networks", {})),
+            len(initial_data.get("resource_pools", {})),
         )
 
     def _apply_filter(self, data: dict[str, Any], category: str) -> dict[str, Any]:

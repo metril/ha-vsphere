@@ -82,12 +82,53 @@ VM_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
 )
 
 # ---------------------------------------------------------------------------
+# Cluster binary sensors
+# ---------------------------------------------------------------------------
+
+CLUSTER_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
+    VSphereBinarySensorDescription(
+        key="drs_enabled",
+        translation_key="drs_enabled",
+        name="DRS Enabled",
+        value_fn=lambda d: bool(d.get("drs_enabled")),
+    ),
+    VSphereBinarySensorDescription(
+        key="ha_enabled",
+        translation_key="ha_enabled",
+        name="HA Enabled",
+        value_fn=lambda d: bool(d.get("ha_enabled")),
+    ),
+    VSphereBinarySensorDescription(
+        key="ha_admission_control",
+        translation_key="ha_admission_control",
+        name="HA Admission Control",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: bool(d.get("ha_admission_control")),
+    ),
+)
+
+# ---------------------------------------------------------------------------
+# Network binary sensors (pNIC only)
+# ---------------------------------------------------------------------------
+
+PNIC_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
+    VSphereBinarySensorDescription(
+        key="link_up",
+        translation_key="link_up",
+        name="Link Up",
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        value_fn=lambda d: bool(d.get("link_up")),
+    ),
+)
+
+# ---------------------------------------------------------------------------
 # Binary sensor map: category → (descriptions, coordinator data key)
 # ---------------------------------------------------------------------------
 
 BINARY_SENSOR_MAP: dict[str, tuple[tuple[VSphereBinarySensorDescription, ...], str]] = {
     "hosts": (HOST_BINARY_SENSORS, "hosts"),
     "vms": (VM_BINARY_SENSORS, "vms"),
+    "clusters": (CLUSTER_BINARY_SENSORS, "clusters"),
 }
 
 
@@ -114,6 +155,24 @@ async def async_setup_entry(
                         coordinator=coordinator,
                         entry=entry,
                         object_type=data_key,
+                        moref=moref,
+                        name=name,
+                        description=description,
+                    )
+                )
+
+    # Network binary sensors: only pNIC objects get link_up
+    if categories.get("network"):
+        for moref, obj_data in coordinator.data.get("networks", {}).items():
+            if obj_data.get("type") != "pnic":
+                continue
+            name = obj_data.get("name", moref)
+            for description in PNIC_BINARY_SENSORS:
+                entities.append(
+                    VSphereBinarySensor(
+                        coordinator=coordinator,
+                        entry=entry,
+                        object_type="networks",
                         moref=moref,
                         name=name,
                         description=description,

@@ -234,6 +234,141 @@ class VSphereClient:
         finally:
             self._disconnect(conn)
 
+    def get_clusters(self) -> dict[str, dict[str, Any]]:
+        """Fetch cluster information."""
+        conn = self._connect()
+        try:
+            view = self._get_container_view(conn, [vim.ClusterComputeResource])
+            clusters: dict[str, dict[str, Any]] = {}
+            for cluster in view.view:
+                moref = cluster._moId  # noqa: SLF001
+                try:
+                    config = cluster.configuration
+                    summary = cluster.summary
+                    clusters[moref] = {
+                        "moref": moref,
+                        "name": cluster.name,
+                        "drs_enabled": config.drsConfig.enabled if config.drsConfig else False,
+                        "drs_automation_level": str(config.drsConfig.defaultVmBehavior)
+                        if config.drsConfig and config.drsConfig.enabled
+                        else None,
+                        "ha_enabled": config.dasConfig.enabled if config.dasConfig else False,
+                        "ha_admission_control": config.dasConfig.admissionControlEnabled if config.dasConfig else False,
+                        "total_hosts": summary.numHosts if summary else 0,
+                        "effective_hosts": summary.numEffectiveHosts if summary else 0,
+                        "total_cpu_mhz": summary.totalCpu if summary else 0,
+                        "total_memory_mb": round(summary.totalMemory / (1024 * 1024), 0)
+                        if summary and summary.totalMemory
+                        else 0,
+                        "vm_count": len(cluster.resourcePool.vm)
+                        if cluster.resourcePool and cluster.resourcePool.vm
+                        else 0,
+                    }
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("Error parsing cluster %s", moref, exc_info=True)
+                    clusters[moref] = {"moref": moref, "name": moref}
+            view.Destroy()
+            return clusters
+        finally:
+            self._disconnect(conn)
+
+    def get_networks(self) -> dict[str, dict[str, Any]]:
+        """Fetch network information (vSwitches, port groups, physical NICs)."""
+        conn = self._connect()
+        try:
+            view = self._get_container_view(conn, [vim.HostSystem])
+            networks: dict[str, dict[str, Any]] = {}
+            try:
+                for host in view.view:
+                    host_moref = host._moId  # noqa: SLF001
+                    try:
+                        host_name = host.summary.config.name
+                        if host.summary.runtime.powerState != "poweredOn":
+                            continue
+                        net_sys = host.configManager.networkSystem
+                        if not net_sys:
+                            continue
+                        net_info = net_sys.networkInfo
+
+                        # Virtual switches
+                        for vswitch in net_info.vswitch or []:
+                            vs_moref = f"{host_moref}_vswitch_{vswitch.name}"
+                            networks[vs_moref] = {
+                                "moref": vs_moref,
+                                "name": f"{host_name} - {vswitch.name}",
+                                "type": "vswitch",
+                                "num_ports": vswitch.numPorts,
+                                "num_ports_available": vswitch.numPorts
+                                - (vswitch.numPortsAvailable if hasattr(vswitch, "numPortsAvailable") else 0)
+                                if vswitch.numPorts
+                                else 0,
+                                "mtu": vswitch.mtu,
+                                "host_name": host_name,
+                            }
+
+                        # Physical NICs
+                        for pnic in net_info.pnic or []:
+                            pnic_moref = f"{host_moref}_pnic_{pnic.device}"
+                            link_speed = pnic.linkSpeed
+                            networks[pnic_moref] = {
+                                "moref": pnic_moref,
+                                "name": f"{host_name} - {pnic.device}",
+                                "type": "pnic",
+                                "link_up": link_speed is not None,
+                                "speed_mbps": link_speed.speedMb if link_speed else None,
+                                "mac": pnic.mac,
+                                "driver": pnic.driver if hasattr(pnic, "driver") else None,
+                                "host_name": host_name,
+                            }
+
+                        # Port groups
+                        for pg in net_info.portgroup or []:
+                            pg_moref = f"{host_moref}_pg_{pg.spec.name}"
+                            networks[pg_moref] = {
+                                "moref": pg_moref,
+                                "name": f"{host_name} - {pg.spec.name}",
+                                "type": "portgroup",
+                                "vlan_id": pg.spec.vlanId,
+                                "vswitch_name": pg.spec.vswitchName,
+                                "host_name": host_name,
+                            }
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.debug("Error parsing network info for host %s", host_moref, exc_info=True)
+            finally:
+                view.Destroy()
+            return networks
+        finally:
+            self._disconnect(conn)
+
+    def get_resource_pools(self) -> dict[str, dict[str, Any]]:
+        """Fetch resource pool information."""
+        conn = self._connect()
+        try:
+            view = self._get_container_view(conn, [vim.ResourcePool])
+            pools: dict[str, dict[str, Any]] = {}
+            for pool in view.view:
+                moref = pool._moId  # noqa: SLF001
+                try:
+                    config = pool.config
+                    cpu_alloc = config.cpuAllocation if config else None
+                    mem_alloc = config.memoryAllocation if config else None
+                    pools[moref] = {
+                        "moref": moref,
+                        "name": pool.name,
+                        "cpu_reservation_mhz": cpu_alloc.reservation if cpu_alloc else 0,
+                        "cpu_limit_mhz": cpu_alloc.limit if cpu_alloc else -1,
+                        "memory_reservation_mb": mem_alloc.reservation if mem_alloc else 0,
+                        "memory_limit_mb": mem_alloc.limit if mem_alloc else -1,
+                        "vm_count": len(pool.vm) if pool.vm else 0,
+                    }
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("Error parsing resource pool %s", moref, exc_info=True)
+                    pools[moref] = {"moref": moref, "name": moref}
+            view.Destroy()
+            return pools
+        finally:
+            self._disconnect(conn)
+
     def get_licenses(self) -> dict[str, dict[str, Any]]:
         """Fetch license information; silently filter evaluation/invalid at DEBUG level."""
         conn = self._connect()
