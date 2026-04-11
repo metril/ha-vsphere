@@ -1,6 +1,12 @@
 # vSphere Control — Home Assistant Integration
 
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
+[![GitHub Release](https://img.shields.io/github/v/release/metril/ha-vsphere)](https://github.com/metril/ha-vsphere/releases)
+[![License: MIT](https://img.shields.io/github/license/metril/ha-vsphere)](LICENSE)
+
 Monitor and control VMware vSphere (ESXi and vCenter) infrastructure directly from Home Assistant. The integration uses a push-based model via the vSphere PropertyCollector API for real-time state updates, with optional polling for performance metrics.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=metril&repository=ha-vsphere&category=integration)
 
 ---
 
