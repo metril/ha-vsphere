@@ -1,0 +1,83 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "vSphere Connection",
+                "description": "Enter your vCenter or ESXi host credentials.",
+                "data": {
+                    "host": "Host",
+                    "port": "Port",
+                    "username": "Username",
+                    "password": "Password",
+                    "verify_ssl": "Verify SSL certificate"
+                }
+            },
+            "categories": {
+                "title": "Monitoring Categories",
+                "description": "Select which categories to monitor.",
+                "data": {
+                    "hosts": "Hosts",
+                    "vms": "Virtual Machines",
+                    "datastores": "Datastores",
+                    "licenses": "Licenses",
+                    "clusters": "Clusters",
+                    "network": "Network",
+                    "resource_pools": "Resource Pools",
+                    "storage_advanced": "Advanced Storage",
+                    "performance": "Performance Metrics",
+                    "events_alarms": "Events & Alarms"
+                }
+            },
+            "entity_selection": {
+                "title": "Entity Selection",
+                "description": "Select which objects to monitor for {category}.",
+                "data": {
+                    "select_all": "Monitor all (including future additions)",
+                    "selected_objects": "Select specific objects"
+                }
+            },
+            "intervals": {
+                "title": "Polling Intervals",
+                "description": "Configure polling intervals for performance metrics.",
+                "data": {
+                    "perf_interval": "Performance metrics interval (seconds)"
+                }
+            },
+            "reauth_confirm": {
+                "title": "Re-authenticate",
+                "description": "Please enter your updated credentials.",
+                "data": {
+                    "username": "Username",
+                    "password": "Password"
+                }
+            },
+            "reconfigure": {
+                "title": "Reconfigure Connection",
+                "description": "Update your vSphere connection details.",
+                "data": {
+                    "host": "Host",
+                    "port": "Port",
+                    "username": "Username",
+                    "password": "Password",
+                    "verify_ssl": "Verify SSL certificate"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Cannot connect to vSphere host",
+            "invalid_auth": "Invalid username or password",
+            "unknown": "An unexpected error occurred"
+        },
+        "abort": {
+            "already_configured": "This vSphere host is already configured"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "vSphere Options",
+                "description": "Configure monitoring categories and intervals."
+            }
+        }
+    }
+}
