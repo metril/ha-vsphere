@@ -124,6 +124,18 @@ class VSphereEntity(CoordinatorEntity[VSphereData]):
                 via_device=(DOMAIN, entry.entry_id),
             )
 
+        if object_type == "storage_advanced":
+            obj_data = (data or {}).get("storage_advanced", {}).get(moref, {})
+            vm_moref = obj_data.get("vm_moref")
+            via = (DOMAIN, f"{entry.entry_id}_{vm_moref}") if vm_moref else (DOMAIN, entry.entry_id)
+            return DeviceInfo(
+                identifiers=identifiers,
+                name=name,
+                manufacturer="VMware",
+                model="Virtual Disk",
+                via_device=via,
+            )
+
         # Fallback
         return DeviceInfo(
             identifiers=identifiers,

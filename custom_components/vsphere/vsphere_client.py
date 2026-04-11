@@ -732,6 +732,80 @@ class VSphereClient:
             result.extend(self._list_snapshots(snap.childSnapshotList, tree=tree))
         return result
 
+    def get_vm_storage_details(self) -> dict[str, dict[str, Any]]:
+        """Fetch per-VM storage details (per-disk usage, policy compliance).
+
+        Returns dict keyed by composite moref: "{vm_moref}_disk_{disk_key}"
+        or "{vm_moref}_storage_summary".
+        """
+        self.ensure_poll_connection()
+        content = self._poll_conn.RetrieveContent()
+        container = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
+        storage: dict[str, dict[str, Any]] = {}
+        try:
+            for vm_obj in container.view:
+                vm_moref = str(vm_obj._moId)  # noqa: SLF001
+                vm_name = vm_obj.summary.config.name
+
+                # Per-disk storage from vm.layoutEx
+                layout = getattr(vm_obj, "layoutEx", None)
+                if not layout:
+                    continue
+
+                # Get virtual disks from config
+                for device in vm_obj.config.hardware.device or []:
+                    if not isinstance(device, vim.vm.device.VirtualDisk):
+                        continue
+
+                    label = device.deviceInfo.label  # e.g., "Hard disk 1"
+                    if hasattr(device, "capacityInBytes") and device.capacityInBytes:
+                        capacity_gb = round(device.capacityInBytes / (1024**3), 2)
+                    elif hasattr(device, "capacityInKB") and device.capacityInKB:
+                        capacity_gb = round(device.capacityInKB / (1024**2), 2)
+                    else:
+                        capacity_gb = 0.0
+
+                    # Get backing file info
+                    backing = device.backing
+                    thin_provisioned = getattr(backing, "thinProvisioned", None)
+                    datastore_name = None
+                    if hasattr(backing, "datastore") and backing.datastore:
+                        datastore_name = backing.datastore.name
+
+                    disk_key = f"{vm_moref}_disk_{device.key}"
+                    storage[disk_key] = {
+                        "moref": disk_key,
+                        "name": f"{vm_name} - {label}",
+                        "vm_moref": vm_moref,
+                        "vm_name": vm_name,
+                        "label": label,
+                        "capacity_gb": capacity_gb,
+                        "thin_provisioned": thin_provisioned,
+                        "datastore": datastore_name,
+                    }
+
+                # Storage summary per VM
+                try:
+                    if vm_obj.summary.storage:
+                        committed = vm_obj.summary.storage.committed
+                        uncommitted = vm_obj.summary.storage.uncommitted
+                        unshared = vm_obj.summary.storage.unshared
+                        storage[f"{vm_moref}_storage_summary"] = {
+                            "moref": f"{vm_moref}_storage_summary",
+                            "name": f"{vm_name} - Storage Summary",
+                            "vm_moref": vm_moref,
+                            "vm_name": vm_name,
+                            "label": "Storage Summary",
+                            "committed_gb": round(committed / (1024**3), 2) if committed else 0.0,
+                            "uncommitted_gb": round(uncommitted / (1024**3), 2) if uncommitted else 0.0,
+                            "unshared_gb": round(unshared / (1024**3), 2) if unshared else 0.0,
+                        }
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("Failed to get storage details for %s", vm_name, exc_info=True)
+        finally:
+            container.Destroy()
+        return storage
+
     # ------------------------------------------------------------------
     # VM operations
     # ------------------------------------------------------------------
@@ -883,6 +957,33 @@ class VSphereClient:
             raise VSphereOperationError(f"Task in progress for VM {vm_moref}: {exc}") from exc
         except vmodl.MethodFault as exc:
             raise VSphereOperationError(f"vSphere fault during remove_snapshot on VM {vm_moref}: {exc}") from exc
+
+    def vm_migrate(self, vm_moref: str, target_host_moref: str) -> None:
+        """Migrate (vMotion) a VM to a target host."""
+        self.ensure_poll_connection()
+        vm_obj = self._get_vm_by_moref(vm_moref)
+        target_host = self._get_host_by_moref(target_host_moref)
+        vm_name = vm_obj.summary.config.name
+        host_name = target_host.summary.config.name
+
+        try:
+            # RelocateVM with just the host change = live vMotion
+            relocate_spec = vim.vm.RelocateSpec()
+            relocate_spec.host = target_host
+            # Use the target host's default resource pool
+            if target_host.parent and hasattr(target_host.parent, "resourcePool"):
+                relocate_spec.pool = target_host.parent.resourcePool
+
+            task = vm_obj.RelocateVM_Task(spec=relocate_spec)
+            self._wait_for_task(task, f"migrate {vm_name} to {host_name}")
+        except vim.fault.MigrationFault as err:
+            raise VSphereOperationError(f"Migration failed for {vm_name}: {err.msg}") from err
+        except (vim.fault.InvalidState, vim.fault.InvalidHostState) as err:
+            raise VSphereOperationError(f"Cannot migrate {vm_name} to {host_name}: {err.msg}") from err
+        except vim.fault.InsufficientResourcesFault as err:
+            raise VSphereOperationError(f"Insufficient resources on {host_name}: {err.msg}") from err
+        except vmodl.MethodFault as err:
+            raise VSphereOperationError(f"vSphere error during migration of {vm_name}: {err.msg}") from err
 
     # ------------------------------------------------------------------
     # Host operations

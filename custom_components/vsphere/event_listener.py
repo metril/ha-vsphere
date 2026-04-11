@@ -97,11 +97,13 @@ class VSphereEventListener:
             )
         if self._categories.get(Category.EVENTS_ALARMS):
             initial_data["alarms"] = self._client.get_alarms()
+        if self._categories.get(Category.STORAGE_ADVANCED):
+            initial_data["storage_advanced"] = self._client.get_vm_storage_details()
 
         self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
         _LOGGER.info(
             "Initial fetch: %d hosts, %d VMs, %d datastores, %d licenses, "
-            "%d clusters, %d networks, %d resource_pools, %d alarm entities",
+            "%d clusters, %d networks, %d resource_pools, %d alarm entities, %d storage objects",
             len(initial_data.get("hosts", {})),
             len(initial_data.get("vms", {})),
             len(initial_data.get("datastores", {})),
@@ -110,6 +112,7 @@ class VSphereEventListener:
             len(initial_data.get("networks", {})),
             len(initial_data.get("resource_pools", {})),
             len(initial_data.get("alarms", {})),
+            len(initial_data.get("storage_advanced", {})),
         )
 
     def _apply_filter(self, data: dict[str, Any], category: str) -> dict[str, Any]:

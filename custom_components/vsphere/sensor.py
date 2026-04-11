@@ -545,6 +545,68 @@ DATASTORE_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = (
 )
 
 # ---------------------------------------------------------------------------
+# Storage advanced sensors
+# ---------------------------------------------------------------------------
+
+VM_DISK_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="capacity_gb",
+        translation_key="capacity_gb",
+        name="Capacity",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("capacity_gb"),
+    ),
+    VSphereSensorDescription(
+        key="thin_provisioned",
+        translation_key="thin_provisioned",
+        name="Thin Provisioned",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: (
+            "Yes" if d.get("thin_provisioned") is True else ("No" if d.get("thin_provisioned") is False else None)
+        ),
+    ),
+    VSphereSensorDescription(
+        key="datastore",
+        translation_key="datastore",
+        name="Datastore",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.get("datastore"),
+    ),
+)
+
+VM_STORAGE_SUMMARY_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="committed_gb",
+        translation_key="committed_gb",
+        name="Committed",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("committed_gb"),
+    ),
+    VSphereSensorDescription(
+        key="uncommitted_gb",
+        translation_key="uncommitted_gb",
+        name="Uncommitted",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("uncommitted_gb"),
+    ),
+    VSphereSensorDescription(
+        key="unshared_gb",
+        translation_key="unshared_gb",
+        name="Unshared",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("unshared_gb"),
+    ),
+)
+
+# ---------------------------------------------------------------------------
 # Alarm sensors (per-entity, keyed by moref in coordinator data["alarms"])
 # ---------------------------------------------------------------------------
 
@@ -638,6 +700,23 @@ async def async_setup_entry(
             name = obj_data.get("name", moref)
             for desc in DATASTORE_PERF_SENSORS:
                 entities.append(VSpherePerfSensor(coordinator, entry, "datastores", moref, name, desc))
+
+    # Storage advanced sensors — per-disk and storage summary per VM
+    if categories.get(Category.STORAGE_ADVANCED):
+        for moref, obj_data in coordinator.data.get("storage_advanced", {}).items():
+            name = obj_data.get("name", moref)
+            descriptions = VM_STORAGE_SUMMARY_SENSORS if "_storage_summary" in moref else VM_DISK_SENSORS
+            for description in descriptions:
+                entities.append(
+                    VSphereSensor(
+                        coordinator=coordinator,
+                        entry=entry,
+                        object_type="storage_advanced",
+                        moref=moref,
+                        name=name,
+                        description=description,
+                    )
+                )
 
     # Alarm count sensors — created for each host/VM when events_alarms is enabled
     if categories.get(Category.EVENTS_ALARMS):
