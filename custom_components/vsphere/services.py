@@ -46,9 +46,7 @@ ATTR_WHICH = "which"
 
 # Schemas
 _VM_POWER_ACTIONS = [
-    a.value
-    for a in VmAction
-    if a not in (VmAction.SNAPSHOT_CREATE, VmAction.SNAPSHOT_REMOVE, VmAction.MIGRATE)
+    a.value for a in VmAction if a not in (VmAction.SNAPSHOT_CREATE, VmAction.SNAPSHOT_REMOVE, VmAction.MIGRATE)
 ]
 
 _SCHEMA_VM_POWER = vol.Schema(
@@ -61,9 +59,7 @@ _SCHEMA_VM_POWER = vol.Schema(
 _SCHEMA_HOST_POWER = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): str,
-        vol.Required(ATTR_ACTION): vol.In(
-            [HostAction.SHUTDOWN.value, HostAction.REBOOT.value]
-        ),
+        vol.Required(ATTR_ACTION): vol.In([HostAction.SHUTDOWN.value, HostAction.REBOOT.value]),
         vol.Optional(ATTR_FORCE, default=False): bool,
     }
 )
@@ -117,9 +113,7 @@ _SCHEMA_LIST_POWER_POLICIES = vol.Schema(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_device(
-    hass: HomeAssistant, device_id: str
-) -> tuple[Any, Any, str, str]:
+def _resolve_device(hass: HomeAssistant, device_id: str) -> tuple[Any, Any, str, str]:
     """Resolve a device_id to (client, resolver, entry_id, moref).
 
     Device identifiers for this integration use the format:
@@ -152,16 +146,12 @@ def _resolve_device(
                 break
 
     if entry_id is None or moref is None:
-        raise HomeAssistantError(
-            f"Cannot extract vSphere moref from device identifiers for device '{device_id}'"
-        )
+        raise HomeAssistantError(f"Cannot extract vSphere moref from device identifiers for device '{device_id}'")
 
     domain_data: dict[str, Any] = hass.data.get(DOMAIN, {})
     entry_data: dict[str, Any] = domain_data.get(entry_id, {})
     if not entry_data:
-        raise HomeAssistantError(
-            f"vSphere config entry '{entry_id}' is not loaded"
-        )
+        raise HomeAssistantError(f"vSphere config entry '{entry_id}' is not loaded")
 
     client = entry_data.get("client")
     resolver = entry_data.get("coordinator") and entry_data.get("resolver")
@@ -169,9 +159,7 @@ def _resolve_device(
     resolver = entry_data.get("resolver")
 
     if client is None:
-        raise HomeAssistantError(
-            f"vSphere client not found for config entry '{entry_id}'"
-        )
+        raise HomeAssistantError(f"vSphere client not found for config entry '{entry_id}'")
 
     return client, resolver, entry_id, moref
 
@@ -190,9 +178,7 @@ async def _handle_vm_power(call: ServiceCall) -> None:
     client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
 
     if resolver is not None and not resolver.is_allowed("vms", moref, action):
-        raise HomeAssistantError(
-            f"Action '{action}' on VM '{moref}' is blocked by permission restrictions"
-        )
+        raise HomeAssistantError(f"Action '{action}' on VM '{moref}' is blocked by permission restrictions")
 
     try:
         await hass.async_add_executor_job(client.vm_power, moref, action)
@@ -210,9 +196,7 @@ async def _handle_host_power(call: ServiceCall) -> None:
     client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
 
     if resolver is not None and not resolver.is_allowed("hosts", moref, action):
-        raise HomeAssistantError(
-            f"Action '{action}' on host '{moref}' is blocked by permission restrictions"
-        )
+        raise HomeAssistantError(f"Action '{action}' on host '{moref}' is blocked by permission restrictions")
 
     try:
         await hass.async_add_executor_job(client.host_power, moref, action, force)
@@ -253,9 +237,7 @@ async def _handle_host_maintenance_mode(call: ServiceCall) -> None:
         )
 
     try:
-        await hass.async_add_executor_job(
-            client.host_set_maintenance_mode, moref, enable
-        )
+        await hass.async_add_executor_job(client.host_set_maintenance_mode, moref, enable)
     except VSphereOperationError as err:
         raise HomeAssistantError(str(err)) from err
 
@@ -277,9 +259,7 @@ async def _handle_create_snapshot(call: ServiceCall) -> None:
         )
 
     try:
-        await hass.async_add_executor_job(
-            client.create_snapshot, moref, name, description, memory, quiesce
-        )
+        await hass.async_add_executor_job(client.create_snapshot, moref, name, description, memory, quiesce)
     except VSphereOperationError as err:
         raise HomeAssistantError(str(err)) from err
 
@@ -326,9 +306,7 @@ async def _handle_list_power_policies(call: ServiceCall) -> dict[str, Any]:
     client, _resolver, _entry_id, moref = _resolve_device(hass, device_id)
 
     try:
-        policies = await hass.async_add_executor_job(
-            client.list_power_policies, moref
-        )
+        policies = await hass.async_add_executor_job(client.list_power_policies, moref)
     except VSphereOperationError as err:
         raise HomeAssistantError(str(err)) from err
 

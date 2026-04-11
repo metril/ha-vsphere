@@ -113,17 +113,11 @@ class VmPowerSwitch(VSphereEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Power on the VM."""
         if not self._resolver.is_allowed("vms", self._moref, VmAction.POWER_ON):
-            raise HomeAssistantError(
-                f"Power on is not allowed for VM {self._moref}"
-            )
+            raise HomeAssistantError(f"Power on is not allowed for VM {self._moref}")
         try:
-            await self.hass.async_add_executor_job(
-                self._client.vm_power, self._moref, "power_on"
-            )
+            await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "power_on")
         except VSphereOperationError as err:
-            raise HomeAssistantError(
-                f"Failed to power on VM {self._moref}: {err}"
-            ) from err
+            raise HomeAssistantError(f"Failed to power on VM {self._moref}: {err}") from err
         # Optimistic state update
         self._attr_is_on = True
         self.async_write_ha_state()
@@ -131,17 +125,11 @@ class VmPowerSwitch(VSphereEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Power off the VM."""
         if not self._resolver.is_allowed("vms", self._moref, VmAction.POWER_OFF):
-            raise HomeAssistantError(
-                f"Power off is not allowed for VM {self._moref}"
-            )
+            raise HomeAssistantError(f"Power off is not allowed for VM {self._moref}")
         try:
-            await self.hass.async_add_executor_job(
-                self._client.vm_power, self._moref, "power_off"
-            )
+            await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "power_off")
         except VSphereOperationError as err:
-            raise HomeAssistantError(
-                f"Failed to power off VM {self._moref}: {err}"
-            ) from err
+            raise HomeAssistantError(f"Failed to power off VM {self._moref}: {err}") from err
         # Optimistic state update
         self._attr_is_on = False
         self.async_write_ha_state()
@@ -181,17 +169,11 @@ class HostMaintenanceSwitch(VSphereEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enter maintenance mode."""
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.MAINTENANCE):
-            raise HomeAssistantError(
-                f"Maintenance mode change is not allowed for host {self._moref}"
-            )
+            raise HomeAssistantError(f"Maintenance mode change is not allowed for host {self._moref}")
         try:
-            await self.hass.async_add_executor_job(
-                self._client.host_set_maintenance_mode, self._moref, True
-            )
+            await self.hass.async_add_executor_job(self._client.host_set_maintenance_mode, self._moref, True)
         except VSphereOperationError as err:
-            raise HomeAssistantError(
-                f"Failed to enter maintenance mode on host {self._moref}: {err}"
-            ) from err
+            raise HomeAssistantError(f"Failed to enter maintenance mode on host {self._moref}: {err}") from err
         # Optimistic state update
         self._attr_is_on = True
         self.async_write_ha_state()
@@ -199,17 +181,11 @@ class HostMaintenanceSwitch(VSphereEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Exit maintenance mode."""
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.MAINTENANCE):
-            raise HomeAssistantError(
-                f"Maintenance mode change is not allowed for host {self._moref}"
-            )
+            raise HomeAssistantError(f"Maintenance mode change is not allowed for host {self._moref}")
         try:
-            await self.hass.async_add_executor_job(
-                self._client.host_set_maintenance_mode, self._moref, False
-            )
+            await self.hass.async_add_executor_job(self._client.host_set_maintenance_mode, self._moref, False)
         except VSphereOperationError as err:
-            raise HomeAssistantError(
-                f"Failed to exit maintenance mode on host {self._moref}: {err}"
-            ) from err
+            raise HomeAssistantError(f"Failed to exit maintenance mode on host {self._moref}: {err}") from err
         # Optimistic state update
         self._attr_is_on = False
         self.async_write_ha_state()

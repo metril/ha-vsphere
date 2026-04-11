@@ -32,9 +32,7 @@ class VSphereEntity(CoordinatorEntity[VSphereData]):
         self._entry = entry
         self._object_type = object_type
         self._moref = moref
-        self._attr_device_info = self._build_device_info(
-            entry, object_type, moref, name, coordinator.data
-        )
+        self._attr_device_info = self._build_device_info(entry, object_type, moref, name, coordinator.data)
 
     @property
     def available(self) -> bool:
@@ -89,11 +87,7 @@ class VSphereEntity(CoordinatorEntity[VSphereData]):
         if object_type == "vms":
             obj_data = (data or {}).get("vms", {}).get(moref, {})
             host_moref = obj_data.get("host_moref")
-            via = (
-                (DOMAIN, f"{entry.entry_id}_{host_moref}")
-                if host_moref
-                else (DOMAIN, entry.entry_id)
-            )
+            via = (DOMAIN, f"{entry.entry_id}_{host_moref}") if host_moref else (DOMAIN, entry.entry_id)
             return DeviceInfo(
                 identifiers=identifiers,
                 name=name,

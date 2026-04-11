@@ -65,9 +65,7 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         return self._data
 
     @callback
-    def async_update_from_push(
-        self, category: str, moref: str, properties: dict[str, Any]
-    ) -> None:
+    def async_update_from_push(self, category: str, moref: str, properties: dict[str, Any]) -> None:
         """Update from push and notify entities."""
         if category in self._data:
             if moref in self._data[category]:
@@ -124,9 +122,7 @@ class VSpherePerfCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch performance data and push it into VSphereData."""
         try:
-            perf_data: dict[str, Any] = await self.hass.async_add_executor_job(
-                self._fetch_performance
-            )
+            perf_data: dict[str, Any] = await self.hass.async_add_executor_job(self._fetch_performance)
             self._vsphere_data.update_perf(perf_data)
             self._vsphere_data.async_set_updated_data(self._vsphere_data._data)  # noqa: SLF001
             return perf_data

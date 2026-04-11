@@ -91,9 +91,7 @@ class PermissionResolver:
         ``blocked`` is True when the action is denied.
         ``reason`` is a human-readable description of the deciding rule.
         """
-        obj_rules: dict[str, Any] = (
-            self._restrictions.get(category, {}).get(moref, {})
-        )
+        obj_rules: dict[str, Any] = self._restrictions.get(category, {}).get(moref, {})
         global_rules: dict[str, Any] = self._restrictions.get("global", {})
 
         # ------------------------------------------------------------------
@@ -104,8 +102,7 @@ class PermissionResolver:
             blocked = bool(value)
             state = "blocked" if blocked else "allowed"
             return blocked, (
-                f"{state} by per-object per-action rule "
-                f"(category={category}, moref={moref}, action={action})"
+                f"{state} by per-object per-action rule (category={category}, moref={moref}, action={action})"
             )
 
         # ------------------------------------------------------------------
@@ -115,10 +112,7 @@ class PermissionResolver:
         if value is not _UNSET:
             blocked = bool(value)
             state = "blocked" if blocked else "allowed"
-            return blocked, (
-                f"{state} by per-object blanket rule "
-                f"(category={category}, moref={moref}, _all={value})"
-            )
+            return blocked, (f"{state} by per-object blanket rule (category={category}, moref={moref}, _all={value})")
 
         # ------------------------------------------------------------------
         # Step 3: global per-action
@@ -127,9 +121,7 @@ class PermissionResolver:
         if value is not _UNSET:
             blocked = bool(value)
             state = "blocked" if blocked else "allowed"
-            return blocked, (
-                f"{state} by global per-action rule (action={action})"
-            )
+            return blocked, (f"{state} by global per-action rule (action={action})")
 
         # ------------------------------------------------------------------
         # Step 4: global shortcut groups
@@ -145,10 +137,7 @@ class PermissionResolver:
             if value is not _UNSET:
                 blocked = bool(value)
                 state = "blocked" if blocked else "allowed"
-                return blocked, (
-                    f"{state} by global shortcut group '{group_name}' "
-                    f"(action={action})"
-                )
+                return blocked, (f"{state} by global shortcut group '{group_name}' (action={action})")
 
         # ------------------------------------------------------------------
         # Step 5: global nuclear switch (_all)
@@ -157,9 +146,7 @@ class PermissionResolver:
         if value is not _UNSET:
             blocked = bool(value)
             state = "blocked" if blocked else "allowed"
-            return blocked, (
-                f"{state} by global _all switch"
-            )
+            return blocked, (f"{state} by global _all switch")
 
         # ------------------------------------------------------------------
         # Step 6: default — allowed

@@ -73,21 +73,13 @@ class VSphereClient:
                 sslContext=ssl_context,
             )
         except vim.fault.InvalidLogin as exc:
-            raise VSphereAuthError(
-                f"Invalid credentials for {self._host}: {exc}"
-            ) from exc
+            raise VSphereAuthError(f"Invalid credentials for {self._host}: {exc}") from exc
         except vim.fault.PasswordExpired as exc:
-            raise VSphereAuthError(
-                f"Password expired for {self._host}: {exc}"
-            ) from exc
+            raise VSphereAuthError(f"Password expired for {self._host}: {exc}") from exc
         except (TimeoutError, ConnectionRefusedError, ssl.SSLError, OSError) as exc:
-            raise VSphereConnectionError(
-                f"Cannot connect to {self._host}:{self._port}: {exc}"
-            ) from exc
+            raise VSphereConnectionError(f"Cannot connect to {self._host}:{self._port}: {exc}") from exc
         except vmodl.MethodFault as exc:
-            raise VSphereConnectionError(
-                f"vSphere method fault during connect to {self._host}: {exc}"
-            ) from exc
+            raise VSphereConnectionError(f"vSphere method fault during connect to {self._host}: {exc}") from exc
 
         _LOGGER.debug("Connected to vSphere at %s:%s", self._host, self._port)
         return conn
@@ -161,11 +153,7 @@ class VSphereClient:
         try:
             content = conn.RetrieveContent()
             about = content.about
-            conn_type = (
-                CONN_TYPE_VCENTER
-                if "VirtualCenter" in (about.apiType or "")
-                else CONN_TYPE_ESXI
-            )
+            conn_type = CONN_TYPE_VCENTER if "VirtualCenter" in (about.apiType or "") else CONN_TYPE_ESXI
             return {
                 "type": conn_type,
                 "name": about.fullName or "",
@@ -179,14 +167,10 @@ class VSphereClient:
     # Data fetching helpers
     # ------------------------------------------------------------------
 
-    def _get_container_view(
-        self, conn: Any, obj_type: list[Any]
-    ) -> Any:
+    def _get_container_view(self, conn: Any, obj_type: list[Any]) -> Any:
         """Return a ContainerView for the given object types."""
         content = conn.RetrieveContent()
-        return content.viewManager.CreateContainerView(
-            content.rootFolder, obj_type, True
-        )
+        return content.viewManager.CreateContainerView(content.rootFolder, obj_type, True)
 
     # ------------------------------------------------------------------
     # Data fetching — return dict keyed by MoRef ID
@@ -234,23 +218,15 @@ class VSphereClient:
                         "name": summary.name,
                         "type": summary.type,
                         "accessible": summary.accessible,
-                        "capacity_gb": round(summary.capacity / (1024**3), 2)
-                        if summary.capacity
-                        else 0.0,
-                        "free_gb": round(summary.freeSpace / (1024**3), 2)
-                        if summary.freeSpace
-                        else 0.0,
-                        "used_gb": round(
-                            (summary.capacity - summary.freeSpace) / (1024**3), 2
-                        )
+                        "capacity_gb": round(summary.capacity / (1024**3), 2) if summary.capacity else 0.0,
+                        "free_gb": round(summary.freeSpace / (1024**3), 2) if summary.freeSpace else 0.0,
+                        "used_gb": round((summary.capacity - summary.freeSpace) / (1024**3), 2)
                         if summary.capacity and summary.freeSpace is not None
                         else 0.0,
                         "url": summary.url or "",
                     }
                 except Exception:  # noqa: BLE001
-                    _LOGGER.debug(
-                        "Error parsing datastore %s", moref, exc_info=True
-                    )
+                    _LOGGER.debug("Error parsing datastore %s", moref, exc_info=True)
                     info = {"name": moref}
                 result[moref] = info
             view.Destroy()
@@ -328,9 +304,7 @@ class VSphereClient:
         """Find a VirtualMachine object by MoRef ID using the poll connection."""
         self.ensure_poll_connection()
         content = self._poll_conn.RetrieveContent()
-        view = content.viewManager.CreateContainerView(
-            content.rootFolder, [vim.VirtualMachine], True
-        )
+        view = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
         try:
             for vm_obj in view.view:
                 if vm_obj._moId == moref:  # noqa: SLF001
@@ -343,9 +317,7 @@ class VSphereClient:
         """Find a HostSystem object by MoRef ID using the poll connection."""
         self.ensure_poll_connection()
         content = self._poll_conn.RetrieveContent()
-        view = content.viewManager.CreateContainerView(
-            content.rootFolder, [vim.HostSystem], True
-        )
+        view = content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)
         try:
             for host in view.view:
                 if host._moId == moref:  # noqa: SLF001
@@ -381,15 +353,11 @@ class VSphereClient:
                 return task.info.result
             if state == vim.TaskInfo.State.error:
                 error = task.info.error
-                raise VSphereOperationError(
-                    f"Task '{description}' failed: {error}"
-                )
+                raise VSphereOperationError(f"Task '{description}' failed: {error}")
             # queued or running — keep polling
             time.sleep(_TASK_POLL_INTERVAL)
 
-        raise VSphereOperationError(
-            f"Task '{description}' timed out after {_TASK_TIMEOUT}s"
-        )
+        raise VSphereOperationError(f"Task '{description}' timed out after {_TASK_TIMEOUT}s")
 
     # ------------------------------------------------------------------
     # Snapshot helpers
@@ -436,8 +404,7 @@ class VSphereClient:
                         return  # fire-and-forget
                     except vim.fault.ToolsUnavailable:
                         _LOGGER.debug(
-                            "Tools unavailable for ShutdownGuest on %s; "
-                            "falling back to PowerOffVM",
+                            "Tools unavailable for ShutdownGuest on %s; falling back to PowerOffVM",
                             vm_moref,
                         )
                 task = vm.PowerOffVM_Task()
@@ -450,8 +417,7 @@ class VSphereClient:
                         return  # fire-and-forget
                     except vim.fault.ToolsUnavailable:
                         _LOGGER.debug(
-                            "Tools unavailable for RebootGuest on %s; "
-                            "falling back to ResetVM",
+                            "Tools unavailable for RebootGuest on %s; falling back to ResetVM",
                             vm_moref,
                         )
                 task = vm.ResetVM_Task()
@@ -471,25 +437,15 @@ class VSphereClient:
         except VSphereOperationError:
             raise
         except vim.fault.InvalidPowerState as exc:
-            raise VSphereOperationError(
-                f"Invalid power state for VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Invalid power state for VM {vm_moref}: {exc}") from exc
         except vim.fault.TaskInProgress as exc:
-            raise VSphereOperationError(
-                f"Task already in progress for VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Task already in progress for VM {vm_moref}: {exc}") from exc
         except vim.fault.InvalidState as exc:
-            raise VSphereOperationError(
-                f"Invalid state for VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Invalid state for VM {vm_moref}: {exc}") from exc
         except vim.fault.ResourceInUse as exc:
-            raise VSphereOperationError(
-                f"Resource in use for VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Resource in use for VM {vm_moref}: {exc}") from exc
         except vmodl.MethodFault as exc:
-            raise VSphereOperationError(
-                f"vSphere fault during {action} on VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"vSphere fault during {action} on VM {vm_moref}: {exc}") from exc
 
     def create_snapshot(
         self,
@@ -514,25 +470,15 @@ class VSphereClient:
         except VSphereOperationError:
             raise
         except vim.fault.SnapshotFault as exc:
-            raise VSphereOperationError(
-                f"Snapshot fault for VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Snapshot fault for VM {vm_moref}: {exc}") from exc
         except vim.fault.InvalidPowerState as exc:
-            raise VSphereOperationError(
-                f"Invalid power state for snapshot on VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Invalid power state for snapshot on VM {vm_moref}: {exc}") from exc
         except vim.fault.TaskInProgress as exc:
-            raise VSphereOperationError(
-                f"Task in progress for VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Task in progress for VM {vm_moref}: {exc}") from exc
         except vim.fault.InsufficientResourcesFault as exc:
-            raise VSphereOperationError(
-                f"Insufficient resources for snapshot on VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Insufficient resources for snapshot on VM {vm_moref}: {exc}") from exc
         except vmodl.MethodFault as exc:
-            raise VSphereOperationError(
-                f"vSphere fault during create_snapshot on VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"vSphere fault during create_snapshot on VM {vm_moref}: {exc}") from exc
 
     def remove_snapshot(self, vm_moref: str, which: str) -> None:
         """Remove VM snapshot(s).
@@ -567,9 +513,7 @@ class VSphereClient:
             elif which == SNAP_LAST:
                 target = flat[-1]
             else:
-                raise VSphereOperationError(
-                    f"Unknown snapshot target '{which}'; expected all/first/last"
-                )
+                raise VSphereOperationError(f"Unknown snapshot target '{which}'; expected all/first/last")
 
             task = target.RemoveSnapshot_Task(removeChildren=False)
             self._wait_for_task(task, f"remove_snapshot({which}) on {vm.name}")
@@ -580,25 +524,17 @@ class VSphereClient:
             # Idempotent — already gone
             _LOGGER.debug("Snapshot not found on VM %s (already removed)", vm_moref)
         except vim.fault.SnapshotFault as exc:
-            raise VSphereOperationError(
-                f"Snapshot fault for VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Snapshot fault for VM {vm_moref}: {exc}") from exc
         except vim.fault.TaskInProgress as exc:
-            raise VSphereOperationError(
-                f"Task in progress for VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Task in progress for VM {vm_moref}: {exc}") from exc
         except vmodl.MethodFault as exc:
-            raise VSphereOperationError(
-                f"vSphere fault during remove_snapshot on VM {vm_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"vSphere fault during remove_snapshot on VM {vm_moref}: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Host operations
     # ------------------------------------------------------------------
 
-    def host_power(
-        self, host_moref: str, action: str, force: bool = False
-    ) -> None:
+    def host_power(self, host_moref: str, action: str, force: bool = False) -> None:
         """Shutdown or reboot a host.
 
         Safety check: refuses if VMs are running and force=False.
@@ -611,13 +547,11 @@ class VSphereClient:
                 powered_vms = sum(
                     1
                     for vm in (host.vm or [])
-                    if getattr(getattr(vm, "runtime", None), "powerState", None)
-                    == VM_POWER_ON
+                    if getattr(getattr(vm, "runtime", None), "powerState", None) == VM_POWER_ON
                 )
                 if powered_vms > 0:
                     raise VSphereOperationError(
-                        f"Cannot {action} {host_name}: {powered_vms} VMs running. "
-                        "Use force=true to override"
+                        f"Cannot {action} {host_name}: {powered_vms} VMs running. Use force=true to override"
                     )
 
             if action == "shutdown":
@@ -625,26 +559,18 @@ class VSphereClient:
             elif action == "reboot":
                 task = host.RebootHost_Task(force=force)
             else:
-                raise VSphereOperationError(
-                    f"Unknown host power action: {action}"
-                )
+                raise VSphereOperationError(f"Unknown host power action: {action}")
 
             self._wait_for_task(task, f"host_{action} on {host_name}")
 
         except VSphereOperationError:
             raise
         except vim.fault.InvalidState as exc:
-            raise VSphereOperationError(
-                f"Invalid state for host {host_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Invalid state for host {host_moref}: {exc}") from exc
         except vim.fault.TaskInProgress as exc:
-            raise VSphereOperationError(
-                f"Task in progress for host {host_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Task in progress for host {host_moref}: {exc}") from exc
         except vmodl.MethodFault as exc:
-            raise VSphereOperationError(
-                f"vSphere fault during host_{action} on {host_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"vSphere fault during host_{action} on {host_moref}: {exc}") from exc
 
     def host_set_power_policy(self, host_moref: str, policy_name: str) -> None:
         """Change the power policy of a host."""
@@ -652,9 +578,7 @@ class VSphereClient:
             host = self._get_host_by_moref(host_moref)
             power_sys = host.configManager.powerSystem
             if power_sys is None:
-                raise VSphereOperationError(
-                    f"Host {host_moref} does not support power policy configuration"
-                )
+                raise VSphereOperationError(f"Host {host_moref} does not support power policy configuration")
 
             capability = host.config.powerSystemCapability
             available = capability.availablePolicy if capability else []
@@ -663,24 +587,22 @@ class VSphereClient:
                     power_sys.ConfigurePowerPolicy(key=policy.key)
                     return
 
-            raise VSphereOperationError(
-                f"Power policy '{policy_name}' not found on host {host_moref}"
-            )
+            raise VSphereOperationError(f"Power policy '{policy_name}' not found on host {host_moref}")
 
         except VSphereOperationError:
             raise
         except vmodl.MethodFault as exc:
-            raise VSphereOperationError(
-                f"vSphere fault setting power policy on {host_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"vSphere fault setting power policy on {host_moref}: {exc}") from exc
 
     def host_set_maintenance_mode(self, host_moref: str, enable: bool) -> None:
         """Enter or exit maintenance mode for a host."""
         try:
             host = self._get_host_by_moref(host_moref)
-            task = host.EnterMaintenanceMode_Task(
-                timeout=0, evacuatePoweredOffVms=True
-            ) if enable else host.ExitMaintenanceMode_Task(timeout=0)
+            task = (
+                host.EnterMaintenanceMode_Task(timeout=0, evacuatePoweredOffVms=True)
+                if enable
+                else host.ExitMaintenanceMode_Task(timeout=0)
+            )
             host_name = host.summary.config.name if host.summary.config else host_moref
             action = "enter_maintenance" if enable else "exit_maintenance"
             self._wait_for_task(task, f"{action} on {host_name}")
@@ -688,17 +610,11 @@ class VSphereClient:
         except VSphereOperationError:
             raise
         except vim.fault.InvalidState as exc:
-            raise VSphereOperationError(
-                f"Invalid state for host {host_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Invalid state for host {host_moref}: {exc}") from exc
         except vim.fault.TaskInProgress as exc:
-            raise VSphereOperationError(
-                f"Task in progress for host {host_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"Task in progress for host {host_moref}: {exc}") from exc
         except vmodl.MethodFault as exc:
-            raise VSphereOperationError(
-                f"vSphere fault setting maintenance mode on {host_moref}: {exc}"
-            ) from exc
+            raise VSphereOperationError(f"vSphere fault setting maintenance mode on {host_moref}: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Utility / service-response helpers
@@ -770,9 +686,7 @@ class VSphereClient:
         """
         conn = self._push_conn
         if conn is None:
-            raise VSphereConnectionError(
-                "Push connection not established; call connect_push() first"
-            )
+            raise VSphereConnectionError("Push connection not established; call connect_push() first")
 
         content = conn.RetrieveContent()
         pc = content.propertyCollector
@@ -844,12 +758,8 @@ class VSphereClient:
             data["name"] = config.name if config else moref
             data["state"] = str(runtime.powerState) if runtime else "unknown"
             data["maintenance_mode"] = bool(runtime.inMaintenanceMode) if runtime else False
-            data["version"] = (
-                config.product.version if config and config.product else ""
-            )
-            data["build"] = (
-                config.product.build if config and config.product else ""
-            )
+            data["version"] = config.product.version if config and config.product else ""
+            data["build"] = config.product.build if config and config.product else ""
 
             # Capability
             cap = host.capability
@@ -860,9 +770,7 @@ class VSphereClient:
 
             # CPU
             if hardware and hardware.cpuMhz and hardware.numCpuCores:
-                data["cpu_total_ghz"] = round(
-                    hardware.cpuMhz * hardware.numCpuCores / 1000, 2
-                )
+                data["cpu_total_ghz"] = round(hardware.cpuMhz * hardware.numCpuCores / 1000, 2)
             else:
                 data["cpu_total_ghz"] = 0.0
 
@@ -888,11 +796,7 @@ class VSphereClient:
             # Power policy
             try:
                 ps_info = host.config.powerSystemInfo
-                data["power_policy"] = (
-                    ps_info.currentPolicy.shortName
-                    if ps_info and ps_info.currentPolicy
-                    else ""
-                )
+                data["power_policy"] = ps_info.currentPolicy.shortName if ps_info and ps_info.currentPolicy else ""
             except Exception:  # noqa: BLE001
                 data["power_policy"] = ""
 
@@ -941,16 +845,10 @@ class VSphereClient:
 
             # Storage
             storage = summary.storage
-            data["used_space_gb"] = (
-                round(storage.committed / (1024**3), 2)
-                if storage and storage.committed
-                else 0.0
-            )
+            data["used_space_gb"] = round(storage.committed / (1024**3), 2) if storage and storage.committed else 0.0
 
             # Tools
-            data["tools_status"] = (
-                str(guest_summary.toolsStatus) if guest_summary else "toolsNotInstalled"
-            )
+            data["tools_status"] = str(guest_summary.toolsStatus) if guest_summary else "toolsNotInstalled"
 
             # Host info
             if runtime and runtime.host:
@@ -966,17 +864,13 @@ class VSphereClient:
             # Running-only metrics
             if raw_state == "poweredOn" and quick:
                 if quick.overallCpuUsage is not None and runtime and runtime.maxCpuUsage:
-                    data["cpu_use_pct"] = round(
-                        quick.overallCpuUsage / runtime.maxCpuUsage * 100, 1
-                    )
+                    data["cpu_use_pct"] = round(quick.overallCpuUsage / runtime.maxCpuUsage * 100, 1)
                 else:
                     data["cpu_use_pct"] = 0.0
 
                 data["memory_used_mb"] = quick.hostMemoryUsage or 0
                 data["memory_active_mb"] = quick.guestMemoryUsage or 0
-                data["uptime_hours"] = (
-                    round(quick.uptimeSeconds / 3600, 2) if quick.uptimeSeconds else 0.0
-                )
+                data["uptime_hours"] = round(quick.uptimeSeconds / 3600, 2) if quick.uptimeSeconds else 0.0
             else:
                 data["cpu_use_pct"] = 0.0
                 data["memory_used_mb"] = 0
@@ -984,21 +878,13 @@ class VSphereClient:
                 data["uptime_hours"] = 0.0
 
             # Guest info
-            data["guest_ip"] = (
-                guest_summary.ipAddress if guest_summary and guest_summary.ipAddress else ""
-            )
-            data["guest_os"] = (
-                guest_summary.guestFullName
-                if guest_summary and guest_summary.guestFullName
-                else ""
-            )
+            data["guest_ip"] = guest_summary.ipAddress if guest_summary and guest_summary.ipAddress else ""
+            data["guest_os"] = guest_summary.guestFullName if guest_summary and guest_summary.guestFullName else ""
 
             # Snapshot count
             snap_info = vm_obj.snapshot
             if snap_info:
-                data["snapshot_count"] = len(
-                    self._list_snapshots(snap_info.rootSnapshotList)
-                )
+                data["snapshot_count"] = len(self._list_snapshots(snap_info.rootSnapshotList))
             else:
                 data["snapshot_count"] = 0
 

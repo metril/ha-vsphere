@@ -73,12 +73,8 @@ def _connection_schema(
             vol.Required(CONF_USERNAME, default=d.get(CONF_USERNAME, "")): TextSelector(
                 TextSelectorConfig(type=TextSelectorType.TEXT)
             ),
-            vol.Required(CONF_PASSWORD): TextSelector(
-                TextSelectorConfig(type=TextSelectorType.PASSWORD)
-            ),
-            vol.Required(
-                CONF_VERIFY_SSL, default=d.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
-            ): BooleanSelector(),
+            vol.Required(CONF_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+            vol.Required(CONF_VERIFY_SSL, default=d.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)): BooleanSelector(),
         }
     )
 
@@ -89,10 +85,7 @@ def _categories_schema(defaults: dict[str, bool] | None = None) -> vol.Schema:
     if defaults:
         effective.update(defaults)
     return vol.Schema(
-        {
-            vol.Required(cat.value, default=effective.get(cat.value, False)): BooleanSelector()
-            for cat in Category
-        }
+        {vol.Required(cat.value, default=effective.get(cat.value, False)): BooleanSelector() for cat in Category}
     )
 
 
@@ -131,9 +124,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     # Step 1: user — connection details
     # ------------------------------------------------------------------
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial connection step."""
         errors: dict[str, str] = {}
 
@@ -159,9 +150,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     # Step 2: categories
     # ------------------------------------------------------------------
 
-    async def async_step_categories(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle monitoring category selection."""
         if user_input is not None:
             self._categories = {cat.value: user_input.get(cat.value, False) for cat in Category}
@@ -187,19 +176,13 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             verify_ssl=self._connection_data[CONF_VERIFY_SSL],
         )
         try:
-            self._inventory = await self.hass.async_add_executor_job(
-                client.enumerate_inventory
-            )
+            self._inventory = await self.hass.async_add_executor_job(client.enumerate_inventory)
         except Exception:  # noqa: BLE001
             _LOGGER.debug("Could not enumerate inventory; skipping entity selection")
             self._inventory = {}
 
         # Build list of filterable categories that are enabled
-        self._filterable_remaining = [
-            cat
-            for cat in _FILTERABLE_CATEGORIES
-            if self._categories.get(cat.value, False)
-        ]
+        self._filterable_remaining = [cat for cat in _FILTERABLE_CATEGORIES if self._categories.get(cat.value, False)]
         return await self._next_entity_selection_step()
 
     async def _next_entity_selection_step(self) -> ConfigFlowResult:
@@ -210,9 +193,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         self._current_filter_category = self._filterable_remaining.pop(0)
         return await self.async_step_entity_selection()
 
-    async def async_step_entity_selection(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_entity_selection(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle entity selection for the current category."""
         category = self._current_filter_category
         if category is None:
@@ -265,9 +246,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     # Step 4: intervals (only if Performance enabled)
     # ------------------------------------------------------------------
 
-    async def async_step_intervals(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_intervals(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle polling interval configuration."""
         perf_enabled = self._categories.get(Category.PERFORMANCE, False)
 
@@ -287,15 +266,11 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     # Reauth flow
     # ------------------------------------------------------------------
 
-    async def async_step_reauth(
-        self, entry_data: dict[str, Any]
-    ) -> ConfigFlowResult:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Handle re-authentication."""
         return await self.async_step_reauth_confirm()
 
-    async def async_step_reauth_confirm(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle re-auth confirmation step."""
         errors: dict[str, str] = {}
 
@@ -318,9 +293,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_USERNAME, default=existing_data.get(CONF_USERNAME, "")): TextSelector(
                         TextSelectorConfig(type=TextSelectorType.TEXT)
                     ),
-                    vol.Required(CONF_PASSWORD): TextSelector(
-                        TextSelectorConfig(type=TextSelectorType.PASSWORD)
-                    ),
+                    vol.Required(CONF_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
                 }
             ),
             errors=errors,
@@ -330,9 +303,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     # Reconfigure flow
     # ------------------------------------------------------------------
 
-    async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle reconfiguration of connection details."""
         errors: dict[str, str] = {}
 
@@ -344,9 +315,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             if not errors:
                 new_unique_id = f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
                 await self.async_set_unique_id(new_unique_id)
-                self._abort_if_unique_id_configured(
-                    updates={**existing_data, **user_input}
-                )
+                self._abort_if_unique_id_configured(updates={**existing_data, **user_input})
                 return self.async_update_reload_and_abort(
                     reconfigure_entry,
                     data={**existing_data, **user_input},
@@ -412,17 +381,11 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
 class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
     """Options flow for vSphere Control."""
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the options flow entry point."""
         current_options = dict(self.config_entry.options)
-        current_categories: dict[str, bool] = current_options.get(
-            CONF_CATEGORIES, dict(DEFAULT_CATEGORIES)
-        )
-        current_perf_interval: int = current_options.get(
-            CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL
-        )
+        current_categories: dict[str, bool] = current_options.get(CONF_CATEGORIES, dict(DEFAULT_CATEGORIES))
+        current_perf_interval: int = current_options.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)
 
         if user_input is not None:
             categories = {cat.value: user_input.get(cat.value, False) for cat in Category}
@@ -439,15 +402,13 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
             vol.Required(cat.value, default=current_categories.get(cat.value, False)): BooleanSelector()
             for cat in Category
         }
-        schema_fields[vol.Required(CONF_PERF_INTERVAL, default=current_perf_interval)] = (
-            NumberSelector(
-                NumberSelectorConfig(
-                    min=MIN_PERF_INTERVAL,
-                    max=MAX_PERF_INTERVAL,
-                    step=1,
-                    mode=NumberSelectorMode.BOX,
-                    unit_of_measurement="seconds",
-                )
+        schema_fields[vol.Required(CONF_PERF_INTERVAL, default=current_perf_interval)] = NumberSelector(
+            NumberSelectorConfig(
+                min=MIN_PERF_INTERVAL,
+                max=MAX_PERF_INTERVAL,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="seconds",
             )
         )
 

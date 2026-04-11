@@ -85,9 +85,7 @@ VM_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
 # Binary sensor map: category → (descriptions, coordinator data key)
 # ---------------------------------------------------------------------------
 
-BINARY_SENSOR_MAP: dict[
-    str, tuple[tuple[VSphereBinarySensorDescription, ...], str]
-] = {
+BINARY_SENSOR_MAP: dict[str, tuple[tuple[VSphereBinarySensorDescription, ...], str]] = {
     "hosts": (HOST_BINARY_SENSORS, "hosts"),
     "vms": (VM_BINARY_SENSORS, "vms"),
 }

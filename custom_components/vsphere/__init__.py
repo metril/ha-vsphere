@@ -57,9 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     try:
-        connection_info: dict[str, Any] = await hass.async_add_executor_job(
-            client.test_connection
-        )
+        connection_info: dict[str, Any] = await hass.async_add_executor_job(client.test_connection)
     except VSphereAuthError as err:
         raise ConfigEntryAuthFailed(str(err)) from err
     except VSphereConnectionError as err:

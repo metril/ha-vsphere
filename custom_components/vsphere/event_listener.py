@@ -53,9 +53,7 @@ class VSphereEventListener:
         """Start listener (called from executor). Connects, fetches initial data, starts loop."""
         _LOGGER.info("Starting vSphere event listener")
         self._client.connect_push()
-        self._pc, self._pc_filter = self._client.create_property_filter(
-            self._categories, self._entity_filter
-        )
+        self._pc, self._pc_filter = self._client.create_property_filter(self._categories, self._entity_filter)
         self._do_initial_fetch()
         self._stop_event.clear()
         self._thread = threading.Thread(
@@ -82,23 +80,15 @@ class VSphereEventListener:
         initial_data: dict[str, Any] = {}
 
         if self._categories.get(Category.HOSTS):
-            initial_data["hosts"] = self._apply_filter(
-                self._client.get_hosts(), Category.HOSTS
-            )
+            initial_data["hosts"] = self._apply_filter(self._client.get_hosts(), Category.HOSTS)
         if self._categories.get(Category.VMS):
-            initial_data["vms"] = self._apply_filter(
-                self._client.get_vms(), Category.VMS
-            )
+            initial_data["vms"] = self._apply_filter(self._client.get_vms(), Category.VMS)
         if self._categories.get(Category.DATASTORES):
-            initial_data["datastores"] = self._apply_filter(
-                self._client.get_datastores(), Category.DATASTORES
-            )
+            initial_data["datastores"] = self._apply_filter(self._client.get_datastores(), Category.DATASTORES)
         if self._categories.get(Category.LICENSES):
             initial_data["licenses"] = self._client.get_licenses()
 
-        self._hass.loop.call_soon_threadsafe(
-            self._vsphere_data.async_set_initial_data, initial_data
-        )
+        self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
         _LOGGER.info(
             "Initial fetch: %d hosts, %d VMs, %d datastores, %d licenses",
             len(initial_data.get("hosts", {})),
@@ -107,9 +97,7 @@ class VSphereEventListener:
             len(initial_data.get("licenses", {})),
         )
 
-    def _apply_filter(
-        self, data: dict[str, Any], category: str
-    ) -> dict[str, Any]:
+    def _apply_filter(self, data: dict[str, Any], category: str) -> dict[str, Any]:
         """Apply entity filter (all vs select specific morefs)."""
         filter_config: dict[str, Any] = self._entity_filter.get(category, {})
         if filter_config.get("mode", "all") == "all":
@@ -141,9 +129,7 @@ class VSphereEventListener:
                     self._hass.loop.call_soon_threadsafe(self._trigger_reauth)
                     break
                 delay = BACKOFF_SCHEDULE[min(backoff_index, len(BACKOFF_SCHEDULE) - 1)]
-                _LOGGER.warning(
-                    "Event listener error: %s. Reconnecting in %ds", err, delay
-                )
+                _LOGGER.warning("Event listener error: %s. Reconnecting in %ds", err, delay)
                 backoff_index += 1
                 self._stop_event.wait(delay)
                 if self._stop_event.is_set():
@@ -173,9 +159,7 @@ class VSphereEventListener:
             return
 
         if kind == "leave":
-            self._hass.loop.call_soon_threadsafe(
-                self._vsphere_data.async_remove_object, category, moref
-            )
+            self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_remove_object, category, moref)
             self._fire_event(
                 "vsphere_inventory_change",
                 {
@@ -193,9 +177,7 @@ class VSphereEventListener:
 
         if kind == "enter":
             filter_config: dict[str, Any] = self._entity_filter.get(category, {})
-            if filter_config.get("mode", "all") == "select" and moref not in set(
-                filter_config.get("morefs", [])
-            ):
+            if filter_config.get("mode", "all") == "select" and moref not in set(filter_config.get("morefs", [])):
                 return
             self._fire_event(
                 "vsphere_inventory_change",
@@ -204,9 +186,7 @@ class VSphereEventListener:
                     "action": "added",
                     "entity_type": category.rstrip("s"),
                     "entity_moref": moref,
-                    "entity_name": properties.get(
-                        "summary.config.name", properties.get("name", moref)
-                    ),
+                    "entity_name": properties.get("summary.config.name", properties.get("name", moref)),
                 },
             )
 
@@ -232,9 +212,7 @@ class VSphereEventListener:
 
     def _fire_event(self, event_type: str, data: dict[str, Any]) -> None:
         """Fire a Home Assistant event on the event bus."""
-        self._hass.loop.call_soon_threadsafe(
-            self._hass.bus.async_fire, event_type, data
-        )
+        self._hass.loop.call_soon_threadsafe(self._hass.bus.async_fire, event_type, data)
 
     def _trigger_reauth(self) -> None:
         """Trigger a config entry reload due to auth failure."""
@@ -252,7 +230,5 @@ class VSphereEventListener:
         if self._pc_filter:
             with contextlib.suppress(Exception):
                 self._pc_filter.Destroy()
-        self._pc, self._pc_filter = self._client.create_property_filter(
-            self._categories, self._entity_filter
-        )
+        self._pc, self._pc_filter = self._client.create_property_filter(self._categories, self._entity_filter)
         self._do_initial_fetch()

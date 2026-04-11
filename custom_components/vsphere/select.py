@@ -84,9 +84,7 @@ class HostPowerPolicySelect(VSphereEntity, SelectEntity):
         self._attr_unique_id = f"{entry.entry_id}_{moref}_power_policy"
         self._attr_name = "Power Policy"
         # Build initial options list from policy short names
-        self._attr_options = [
-            p.get("short_name", str(p.get("key", ""))) for p in policies
-        ]
+        self._attr_options = [p.get("short_name", str(p.get("key", ""))) for p in policies]
 
     @property
     def options(self) -> list[str]:
@@ -110,14 +108,8 @@ class HostPowerPolicySelect(VSphereEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Change the host power policy."""
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.POWER_POLICY):
-            raise HomeAssistantError(
-                f"Power policy change is not allowed for host {self._moref}"
-            )
+            raise HomeAssistantError(f"Power policy change is not allowed for host {self._moref}")
         try:
-            await self.hass.async_add_executor_job(
-                self._client.host_set_power_policy, self._moref, option
-            )
+            await self.hass.async_add_executor_job(self._client.host_set_power_policy, self._moref, option)
         except VSphereOperationError as err:
-            raise HomeAssistantError(
-                f"Failed to set power policy on host {self._moref}: {err}"
-            ) from err
+            raise HomeAssistantError(f"Failed to set power policy on host {self._moref}: {err}") from err

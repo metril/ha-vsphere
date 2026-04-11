@@ -15,9 +15,7 @@ if TYPE_CHECKING:
 REDACT_KEYS = {"password", "username", "host", "license_key", "key", "guest_ip"}
 
 
-async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
-) -> dict[str, Any]:
+async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     data = hass.data[DOMAIN].get(entry.entry_id, {})
     coordinator = data.get("coordinator")
