@@ -261,6 +261,7 @@ class VSphereBinarySensor(VSphereEntity, BinarySensorEntity):
 class VSphereChildBinarySensor(VSphereChildEntity, BinarySensorEntity):
     """Binary sensor attached to a parent device but reading from a different data path."""
 
+    _attr_has_entity_name = False
     entity_description: VSphereBinarySensorDescription
 
     def __init__(

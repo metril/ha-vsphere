@@ -798,6 +798,7 @@ class VSphereChildSensor(VSphereChildEntity, SensorEntity):
     Used for network sensors (on host device) and storage sensors (on VM device).
     """
 
+    _attr_has_entity_name = False
     entity_description: VSphereSensorDescription
 
     def __init__(
