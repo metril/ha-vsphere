@@ -134,3 +134,22 @@ list_power_policies:
       selector:
         device:
           integration: vsphere
+
+vm_migrate:
+  name: VM Migration (vMotion)
+  description: Live-migrate a virtual machine to a different host.
+  fields:
+    device_id:
+      name: VM
+      description: The virtual machine to migrate.
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    target_host:
+      name: Target Host
+      description: The destination ESXi host device.
+      required: true
+      selector:
+        device:
+          integration: vsphere

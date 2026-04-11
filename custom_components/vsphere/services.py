@@ -31,6 +31,7 @@ SVC_CREATE_SNAPSHOT = "create_snapshot"
 SVC_REMOVE_SNAPSHOT = "remove_snapshot"
 SVC_LIST_HOSTS = "list_hosts"
 SVC_LIST_POWER_POLICIES = "list_power_policies"
+SVC_VM_MIGRATE = "vm_migrate"
 
 # Field names
 ATTR_DEVICE_ID = "device_id"
@@ -104,6 +105,13 @@ _SCHEMA_LIST_HOSTS = vol.Schema(
 _SCHEMA_LIST_POWER_POLICIES = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): str,
+    }
+)
+
+_SCHEMA_VM_MIGRATE = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required("target_host"): str,
     }
 )
 
@@ -313,6 +321,23 @@ async def _handle_list_power_policies(call: ServiceCall) -> dict[str, Any]:
     return {"policies": policies}
 
 
+async def _handle_vm_migrate(call: ServiceCall) -> None:
+    """Handle the vm_migrate service call."""
+    hass = call.hass
+    client, resolver, _entry_id, vm_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
+
+    if resolver is not None and not resolver.is_allowed("vms", vm_moref, "migrate"):
+        raise HomeAssistantError(resolver.explain("vms", vm_moref, "migrate"))
+
+    # Resolve target host device_id to moref
+    _, _, _, host_moref = _resolve_device(hass, call.data["target_host"])
+
+    try:
+        await hass.async_add_executor_job(client.vm_migrate, vm_moref, host_moref)
+    except VSphereOperationError as err:
+        raise HomeAssistantError(str(err)) from err
+
+
 # ---------------------------------------------------------------------------
 # Registration / unregistration
 # ---------------------------------------------------------------------------
@@ -387,6 +412,14 @@ async def async_register_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.OPTIONAL,
         )
 
+    if not hass.services.has_service(DOMAIN, SVC_VM_MIGRATE):
+        hass.services.async_register(
+            DOMAIN,
+            SVC_VM_MIGRATE,
+            _handle_vm_migrate,
+            schema=_SCHEMA_VM_MIGRATE,
+        )
+
     _LOGGER.debug("vSphere services registered")
 
 
@@ -401,6 +434,7 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SVC_REMOVE_SNAPSHOT,
         SVC_LIST_HOSTS,
         SVC_LIST_POWER_POLICIES,
+        SVC_VM_MIGRATE,
     ):
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)
