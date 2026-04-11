@@ -21,6 +21,56 @@ _LOGGER = logging.getLogger(__name__)
 BACKOFF_SCHEDULE: list[int] = [5, 10, 30, 60]
 WAIT_OPTIONS_MAX_WAIT: int = 60
 
+# PropertyCollector path → flat entity key translation maps
+_HOST_PROP_MAP: dict[str, str] = {
+    "summary.config.name": "name",
+    "summary.runtime.powerState": "state",
+    "summary.runtime.inMaintenanceMode": "maintenance_mode",
+    "summary.quickStats.uptime": "_uptime_raw",
+    "summary.quickStats.overallCpuUsage": "_cpu_usage_raw",
+    "summary.quickStats.overallMemoryUsage": "_mem_usage_raw",
+    "summary.hardware.cpuMhz": "_cpu_mhz",
+    "summary.hardware.numCpuCores": "_cpu_cores",
+    "summary.hardware.memorySize": "_mem_bytes",
+    "summary.config.product.version": "version",
+    "summary.config.product.build": "build",
+    "config.powerSystemInfo.currentPolicy.shortName": "power_policy",
+    "capability.shutdownSupported": "shutdown_supported",
+    "vm": "_vm_list",
+}
+
+_VM_PROP_MAP: dict[str, str] = {
+    "summary.config.name": "name",
+    "summary.config.numCpu": "cpu_count",
+    "summary.config.memorySizeMB": "memory_allocated_mb",
+    "summary.config.uuid": "uuid",
+    "summary.config.guestFullName": "_configured_guest_os",
+    "summary.runtime.powerState": "power_state",
+    "runtime.powerState": "power_state",
+    "summary.overallStatus": "status",
+    "summary.quickStats.overallCpuUsage": "_cpu_usage_raw",
+    "summary.quickStats.hostMemoryUsage": "memory_used_mb",
+    "summary.quickStats.guestMemoryUsage": "memory_active_mb",
+    "summary.quickStats.uptimeSeconds": "_uptime_raw",
+    "summary.guest.toolsStatus": "tools_status",
+    "summary.guest.ipAddress": "guest_ip",
+    "summary.guest.guestFullName": "guest_os",
+    "summary.storage.committed": "_storage_raw",
+    "runtime.host": "_host_obj",
+    "runtime.maxCpuUsage": "_max_cpu",
+    "snapshot": "_snapshot_obj",
+    "configStatus": "_config_status",
+}
+
+_DATASTORE_PROP_MAP: dict[str, str] = {
+    "summary.name": "name",
+    "summary.type": "type",
+    "summary.capacity": "_capacity_raw",
+    "summary.freeSpace": "_free_raw",
+    "host": "_host_list",
+    "vm": "_vm_list",
+}
+
 
 class VSphereEventListener:
     """Listens for vSphere property changes via PropertyCollector WaitForUpdatesEx.
@@ -224,12 +274,133 @@ class VSphereEventListener:
                 },
             )
 
+        # Translate raw PropertyCollector paths to flat entity keys
+        translated = self._translate_properties(category, properties)
+
         self._hass.loop.call_soon_threadsafe(
             self._vsphere_data.async_update_from_push,
             category,
             moref,
-            properties,
+            translated,
         )
+
+    def _translate_properties(self, category: str, raw_props: dict[str, Any]) -> dict[str, Any]:
+        """Translate raw PropertyCollector paths to flat entity keys with derived values."""
+        if category == "hosts":
+            prop_map = _HOST_PROP_MAP
+        elif category == "vms":
+            prop_map = _VM_PROP_MAP
+        elif category == "datastores":
+            prop_map = _DATASTORE_PROP_MAP
+        else:
+            return raw_props
+
+        translated: dict[str, Any] = {}
+        for raw_key, value in raw_props.items():
+            flat_key = prop_map.get(raw_key)
+            translated[flat_key if flat_key else raw_key] = value
+
+        if category == "hosts":
+            self._derive_host_values(translated)
+        elif category == "vms":
+            self._derive_vm_values(translated)
+        elif category == "datastores":
+            self._derive_datastore_values(translated)
+
+        return {k: v for k, v in translated.items() if not k.startswith("_")}
+
+    def _derive_host_values(self, d: dict[str, Any]) -> None:
+        """Compute derived host values from raw inputs."""
+        if "_uptime_raw" in d:
+            val = d.pop("_uptime_raw")
+            if val is not None:
+                d["uptime_hours"] = round(val / 3600, 1)
+        if "_cpu_usage_raw" in d:
+            val = d.pop("_cpu_usage_raw")
+            if val is not None:
+                d["cpu_usage_ghz"] = round(val / 1000, 1)
+        if "_mem_usage_raw" in d:
+            val = d.pop("_mem_usage_raw")
+            if val is not None:
+                d["mem_usage_gb"] = round(val / 1024, 2)
+        if "_cpu_mhz" in d and "_cpu_cores" in d:
+            mhz, cores = d.pop("_cpu_mhz"), d.pop("_cpu_cores")
+            if mhz and cores:
+                d["cpu_total_ghz"] = round(mhz * cores / 1000, 1)
+        else:
+            d.pop("_cpu_mhz", None)
+            d.pop("_cpu_cores", None)
+        if "_mem_bytes" in d:
+            val = d.pop("_mem_bytes")
+            if val:
+                d["mem_total_gb"] = round(val / (1024**3), 2)
+        if "_vm_list" in d:
+            val = d.pop("_vm_list")
+            d["vm_count"] = len(val) if val else 0
+
+    def _derive_vm_values(self, d: dict[str, Any]) -> None:
+        """Compute derived VM values from raw inputs."""
+        if "power_state" in d:
+            ps = str(d["power_state"])
+            d["state"] = {"poweredOn": "running", "poweredOff": "off", "suspended": "suspended"}.get(ps, ps)
+        if "_uptime_raw" in d:
+            val = d.pop("_uptime_raw")
+            if val is not None:
+                d["uptime_hours"] = round(val / 3600, 1)
+        if "_cpu_usage_raw" in d and "_max_cpu" in d:
+            usage, max_cpu = d.pop("_cpu_usage_raw"), d.pop("_max_cpu")
+            if usage and max_cpu:
+                d["cpu_use_pct"] = round((usage / max_cpu) * 100, 2)
+        else:
+            d.pop("_cpu_usage_raw", None)
+            d.pop("_max_cpu", None)
+        if "_storage_raw" in d:
+            val = d.pop("_storage_raw")
+            if val:
+                d["used_space_gb"] = round(val / (1024**3), 2)
+        if "_host_obj" in d:
+            host_obj = d.pop("_host_obj")
+            if host_obj:
+                try:
+                    d["host_moref"] = str(host_obj._moId)
+                    d["host_name"] = host_obj.name
+                except Exception:  # noqa: BLE001
+                    pass
+        if "_snapshot_obj" in d:
+            snap_obj = d.pop("_snapshot_obj")
+            if snap_obj is not None and hasattr(snap_obj, "rootSnapshotList"):
+                d["snapshots"] = self._count_snapshots(snap_obj.rootSnapshotList)
+            else:
+                d["snapshots"] = 0
+        d.pop("_configured_guest_os", None)
+        d.pop("_config_status", None)
+
+    def _derive_datastore_values(self, d: dict[str, Any]) -> None:
+        """Compute derived datastore values from raw inputs."""
+        if "_capacity_raw" in d:
+            val = d.pop("_capacity_raw")
+            if val:
+                d["total_space_gb"] = round(val / (1024**3), 2)
+        if "_free_raw" in d:
+            val = d.pop("_free_raw")
+            if val:
+                d["free_space_gb"] = round(val / (1024**3), 2)
+        if "_host_list" in d:
+            val = d.pop("_host_list")
+            d["connected_hosts"] = len(val) if val else 0
+        if "_vm_list" in d:
+            val = d.pop("_vm_list")
+            d["virtual_machines"] = len(val) if val else 0
+
+    @staticmethod
+    def _count_snapshots(snapshot_list: Any) -> int:
+        """Recursively count snapshots in a tree."""
+        count = 0
+        if snapshot_list:
+            for snap in snapshot_list:
+                count += 1
+                count += VSphereEventListener._count_snapshots(snap.childSnapshotList)
+        return count
 
     def _obj_type_to_category(self, obj_type: type) -> str | None:
         """Map a pyVmomi object type to a data category string."""

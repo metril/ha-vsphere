@@ -397,9 +397,35 @@ class VSphereClient:
 
                 total = getattr(lic, "total", 0) or 0
                 used = getattr(lic, "used", 0) or 0
+
+                # Parse properties for product name, expiration
+                product = str(product_name)
+                expiration_days: int | str = "never"
+                for prop in getattr(lic, "properties", []):
+                    if prop.key == "ProductName":
+                        product = str(prop.value)
+                    elif prop.key == "count_disabled":
+                        expiration_days = "never"
+                    elif prop.key == "expirationHours":
+                        expiration_days = round(prop.value / 24)
+
+                # Determine status from expiration
+                if isinstance(expiration_days, int):
+                    if expiration_days > 30:
+                        status = "Ok"
+                    elif expiration_days >= 1:
+                        status = "Expiring Soon"
+                    else:
+                        status = "Expired"
+                else:
+                    status = "Ok"
+
                 result[key] = {
                     "name": str(product_name),
                     "key": key,
+                    "product": product,
+                    "status": status,
+                    "expiration_days": expiration_days,
                     "total": total,
                     "used": used,
                     "free": max(0, total - used),
