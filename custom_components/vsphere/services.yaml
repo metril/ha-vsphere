@@ -1,0 +1,136 @@
+vm_power:
+  name: VM Power Control
+  description: Control the power state of a virtual machine.
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    action:
+      required: true
+      selector:
+        select:
+          options:
+            - power_on
+            - power_off
+            - shutdown
+            - reboot
+            - reset
+            - suspend
+
+host_power:
+  name: Host Power Control
+  description: Shutdown or reboot an ESXi host.
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    action:
+      required: true
+      selector:
+        select:
+          options:
+            - shutdown
+            - reboot
+    force:
+      required: false
+      default: false
+      selector:
+        boolean:
+
+host_power_policy:
+  name: Host Power Policy
+  description: Set the power management policy for an ESXi host.
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    policy:
+      required: true
+      selector:
+        text:
+
+host_maintenance_mode:
+  name: Host Maintenance Mode
+  description: Enable or disable maintenance mode on an ESXi host.
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    enable:
+      required: true
+      selector:
+        boolean:
+
+create_snapshot:
+  name: Create VM Snapshot
+  description: Create a snapshot of a virtual machine.
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    name:
+      required: false
+      selector:
+        text:
+    description:
+      required: false
+      selector:
+        text:
+    memory:
+      required: false
+      default: false
+      selector:
+        boolean:
+    quiesce:
+      required: false
+      default: false
+      selector:
+        boolean:
+
+remove_snapshot:
+  name: Remove VM Snapshot
+  description: Remove one or all snapshots from a virtual machine.
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    which:
+      required: true
+      selector:
+        select:
+          options:
+            - all
+            - first
+            - last
+
+list_hosts:
+  name: List Hosts
+  description: Return a list of all ESXi hosts managed by this vSphere connection.
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: vsphere
+
+list_power_policies:
+  name: List Power Policies
+  description: Return the available power management policies for an ESXi host.
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: vsphere
