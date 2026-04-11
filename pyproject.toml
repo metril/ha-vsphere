@@ -1,0 +1,30 @@
+[project]
+name = "ha-vsphere"
+version = "1.0.0"
+description = "Home Assistant integration for VMware vSphere monitoring and control"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "pyvmomi>=8.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "TCH"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
