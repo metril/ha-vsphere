@@ -13,7 +13,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.const import EntityCategory
 
 from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, Category
-from .entity import VSphereEntity
+from .entity import VSphereChildEntity, VSphereEntity
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -174,21 +174,27 @@ async def async_setup_entry(
                     )
                 )
 
-    # Network binary sensors: only pNIC objects get link_up
+    # Network binary sensors: pNIC link_up attached to parent Host device
     if categories.get("network"):
-        for moref, obj_data in coordinator.data.get("networks", {}).items():
+        hosts_data = coordinator.data.get("hosts", {})
+        for net_moref, obj_data in coordinator.data.get("networks", {}).items():
             if obj_data.get("type") != "pnic":
                 continue
-            name = obj_data.get("name", moref)
+            name = obj_data.get("name", net_moref)
+            host_moref = obj_data.get("host_moref", net_moref.split("_")[0] if "_" in net_moref else "")
+            host_name = hosts_data.get(host_moref, {}).get("name", host_moref)
             for description in PNIC_BINARY_SENSORS:
                 entities.append(
-                    VSphereBinarySensor(
+                    VSphereChildBinarySensor(
                         coordinator=coordinator,
                         entry=entry,
-                        object_type="networks",
-                        moref=moref,
-                        name=name,
+                        parent_object_type="hosts",
+                        parent_moref=host_moref,
+                        parent_name=host_name,
+                        data_category="networks",
+                        data_moref=net_moref,
                         description=description,
+                        entity_name=name,
                     )
                 )
 
@@ -242,6 +248,38 @@ class VSphereBinarySensor(VSphereEntity, BinarySensorEntity):
         super().__init__(coordinator, entry, object_type, moref, name)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{moref}_{description.key}"
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if the binary sensor is on."""
+        obj_data = self._get_data()
+        if obj_data is None:
+            return None
+        return self.entity_description.value_fn(obj_data)
+
+
+class VSphereChildBinarySensor(VSphereChildEntity, BinarySensorEntity):
+    """Binary sensor attached to a parent device but reading from a different data path."""
+
+    entity_description: VSphereBinarySensorDescription
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        parent_object_type: str,
+        parent_moref: str,
+        parent_name: str,
+        data_category: str,
+        data_moref: str,
+        description: VSphereBinarySensorDescription,
+        entity_name: str,
+    ) -> None:
+        """Initialize the child binary sensor."""
+        super().__init__(coordinator, entry, parent_object_type, parent_moref, parent_name, data_category, data_moref)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{data_moref}_{description.key}"
+        self._attr_name = f"{entity_name} {description.name}" if description.name else entity_name
 
     @property
     def is_on(self) -> bool | None:

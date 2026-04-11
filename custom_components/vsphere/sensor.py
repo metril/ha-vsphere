@@ -20,7 +20,7 @@ from homeassistant.const import (
 )
 
 from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, Category
-from .entity import VSphereEntity
+from .entity import VSphereChildEntity, VSphereEntity
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -663,26 +663,34 @@ async def async_setup_entry(
                     )
                 )
 
-    # Network sensors: mixed types require per-type description sets
+    # Network sensors: attach to parent Host device, read from "networks" data
     if categories.get("network"):
         _network_type_map: dict[str, tuple[VSphereSensorDescription, ...]] = {
             "vswitch": VSWITCH_SENSORS,
             "pnic": PNIC_SENSORS,
             "portgroup": PORTGROUP_SENSORS,
         }
-        for moref, obj_data in coordinator.data.get("networks", {}).items():
+        # Build host name lookup for parent device attachment
+        hosts_data = coordinator.data.get("hosts", {})
+        for net_moref, obj_data in coordinator.data.get("networks", {}).items():
             net_type = obj_data.get("type", "")
             type_descriptions = _network_type_map.get(net_type, ())
-            name = obj_data.get("name", moref)
+            name = obj_data.get("name", net_moref)
+            # Extract host_moref from composite key (e.g., "host-42_vswitch_vSwitch0")
+            host_moref = obj_data.get("host_moref", net_moref.split("_")[0] if "_" in net_moref else "")
+            host_name = hosts_data.get(host_moref, {}).get("name", host_moref)
             for description in type_descriptions:
                 entities.append(
-                    VSphereSensor(
+                    VSphereChildSensor(
                         coordinator=coordinator,
                         entry=entry,
-                        object_type="networks",
-                        moref=moref,
-                        name=name,
+                        parent_object_type="hosts",
+                        parent_moref=host_moref,
+                        parent_name=host_name,
+                        data_category="networks",
+                        data_moref=net_moref,
                         description=description,
+                        entity_name=name,
                     )
                 )
 
@@ -701,20 +709,26 @@ async def async_setup_entry(
             for desc in DATASTORE_PERF_SENSORS:
                 entities.append(VSpherePerfSensor(coordinator, entry, "datastores", moref, name, desc))
 
-    # Storage advanced sensors — per-disk and storage summary per VM
+    # Storage advanced sensors — attach to parent VM device, read from "storage_advanced" data
     if categories.get(Category.STORAGE_ADVANCED):
-        for moref, obj_data in coordinator.data.get("storage_advanced", {}).items():
-            name = obj_data.get("name", moref)
-            descriptions = VM_STORAGE_SUMMARY_SENSORS if "_storage_summary" in moref else VM_DISK_SENSORS
+        vms_data = coordinator.data.get("vms", {})
+        for storage_moref, obj_data in coordinator.data.get("storage_advanced", {}).items():
+            name = obj_data.get("name", storage_moref)
+            vm_moref = obj_data.get("vm_moref", "")
+            vm_name = vms_data.get(vm_moref, {}).get("name", vm_moref)
+            descriptions = VM_STORAGE_SUMMARY_SENSORS if "_storage_summary" in storage_moref else VM_DISK_SENSORS
             for description in descriptions:
                 entities.append(
-                    VSphereSensor(
+                    VSphereChildSensor(
                         coordinator=coordinator,
                         entry=entry,
-                        object_type="storage_advanced",
-                        moref=moref,
-                        name=name,
+                        parent_object_type="vms",
+                        parent_moref=vm_moref,
+                        parent_name=vm_name,
+                        data_category="storage_advanced",
+                        data_moref=storage_moref,
                         description=description,
+                        entity_name=name,
                     )
                 )
 
@@ -768,6 +782,41 @@ class VSphereSensor(VSphereEntity, SensorEntity):
         super().__init__(coordinator, entry, object_type, moref, name)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{moref}_{description.key}"
+
+    @property
+    def native_value(self) -> Any:
+        """Return the sensor value."""
+        obj_data = self._get_data()
+        if obj_data is None:
+            return None
+        return self.entity_description.value_fn(obj_data)
+
+
+class VSphereChildSensor(VSphereChildEntity, SensorEntity):
+    """Sensor attached to a parent device but reading data from a different coordinator path.
+
+    Used for network sensors (on host device) and storage sensors (on VM device).
+    """
+
+    entity_description: VSphereSensorDescription
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        parent_object_type: str,
+        parent_moref: str,
+        parent_name: str,
+        data_category: str,
+        data_moref: str,
+        description: VSphereSensorDescription,
+        entity_name: str,
+    ) -> None:
+        """Initialize the child sensor."""
+        super().__init__(coordinator, entry, parent_object_type, parent_moref, parent_name, data_category, data_moref)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{data_moref}_{description.key}"
+        self._attr_name = f"{entity_name} {description.name}" if description.name else entity_name
 
     @property
     def native_value(self) -> Any:

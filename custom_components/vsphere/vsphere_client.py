@@ -306,6 +306,7 @@ class VSphereClient:
                                 if vswitch.numPorts
                                 else 0,
                                 "mtu": vswitch.mtu,
+                                "host_moref": host_moref,
                                 "host_name": host_name,
                             }
 
@@ -321,6 +322,7 @@ class VSphereClient:
                                 "speed_mbps": link_speed.speedMb if link_speed else None,
                                 "mac": pnic.mac,
                                 "driver": pnic.driver if hasattr(pnic, "driver") else None,
+                                "host_moref": host_moref,
                                 "host_name": host_name,
                             }
 
@@ -333,6 +335,7 @@ class VSphereClient:
                                 "type": "portgroup",
                                 "vlan_id": pg.spec.vlanId,
                                 "vswitch_name": pg.spec.vswitchName,
+                                "host_moref": host_moref,
                                 "host_name": host_name,
                             }
                     except Exception:  # noqa: BLE001

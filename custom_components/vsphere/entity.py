@@ -124,21 +124,48 @@ class VSphereEntity(CoordinatorEntity[VSphereData]):
                 via_device=(DOMAIN, entry.entry_id),
             )
 
-        if object_type == "storage_advanced":
-            obj_data = (data or {}).get("storage_advanced", {}).get(moref, {})
-            vm_moref = obj_data.get("vm_moref")
-            via = (DOMAIN, f"{entry.entry_id}_{vm_moref}") if vm_moref else (DOMAIN, entry.entry_id)
-            return DeviceInfo(
-                identifiers=identifiers,
-                name=name,
-                manufacturer="VMware",
-                model="Virtual Disk",
-                via_device=via,
-            )
-
         # Fallback
         return DeviceInfo(
             identifiers=identifiers,
             name=name,
             via_device=(DOMAIN, entry.entry_id),
         )
+
+
+class VSphereChildEntity(VSphereEntity):
+    """Entity that attaches to a parent device but reads data from a different coordinator path.
+
+    Used for storage_advanced sensors (attached to VM device, data in coordinator["storage_advanced"])
+    and network sensors (attached to Host device, data in coordinator["networks"]).
+    """
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        parent_object_type: str,
+        parent_moref: str,
+        parent_name: str,
+        data_category: str,
+        data_moref: str,
+    ) -> None:
+        """Initialize the child entity."""
+        # Use parent's object_type and moref for device attachment
+        super().__init__(coordinator, entry, parent_object_type, parent_moref, parent_name)
+        # Store the actual data location for _get_data()
+        self._data_category = data_category
+        self._data_moref = data_moref
+
+    @property
+    def available(self) -> bool:
+        """Entity is available if its data exists in coordinator."""
+        if not self.coordinator.data:
+            return False
+        category_data = self.coordinator.data.get(self._data_category, {})
+        return self._data_moref in category_data and CoordinatorEntity.available.fget(self)
+
+    def _get_data(self) -> dict[str, Any] | None:
+        """Get this entity's data from the child data location."""
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.get(self._data_category, {}).get(self._data_moref)
