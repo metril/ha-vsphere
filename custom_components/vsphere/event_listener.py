@@ -361,17 +361,17 @@ class VSphereEventListener:
         if "_host_obj" in d:
             host_obj = d.pop("_host_obj")
             if host_obj:
-                try:
+                # Only read _moId (local attribute). Don't access host_obj.name —
+                # it triggers a live RPC on the push connection from this thread.
+                # host_name is already populated from the initial fetch.
+                with contextlib.suppress(Exception):
                     d["host_moref"] = str(host_obj._moId)
-                    d["host_name"] = host_obj.name
-                except Exception:  # noqa: BLE001
-                    pass
         if "_snapshot_obj" in d:
             snap_obj = d.pop("_snapshot_obj")
             if snap_obj is not None and hasattr(snap_obj, "rootSnapshotList"):
-                d["snapshots"] = self._count_snapshots(snap_obj.rootSnapshotList)
+                d["snapshot_count"] = self._count_snapshots(snap_obj.rootSnapshotList)
             else:
-                d["snapshots"] = 0
+                d["snapshot_count"] = 0
         d.pop("_configured_guest_os", None)
         d.pop("_config_status", None)
 
@@ -380,11 +380,11 @@ class VSphereEventListener:
         if "_capacity_raw" in d:
             val = d.pop("_capacity_raw")
             if val:
-                d["total_space_gb"] = round(val / (1024**3), 2)
+                d["capacity_gb"] = round(val / (1024**3), 2)
         if "_free_raw" in d:
             val = d.pop("_free_raw")
             if val:
-                d["free_space_gb"] = round(val / (1024**3), 2)
+                d["free_gb"] = round(val / (1024**3), 2)
         if "_host_list" in d:
             val = d.pop("_host_list")
             d["connected_hosts"] = len(val) if val else 0

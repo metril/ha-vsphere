@@ -6,6 +6,7 @@ All methods are synchronous and designed to run in hass.async_add_executor_job()
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import ssl
 import time
@@ -407,7 +408,8 @@ class VSphereClient:
                     elif prop.key == "count_disabled":
                         expiration_days = "never"
                     elif prop.key == "expirationHours":
-                        expiration_days = round(prop.value / 24)
+                        with contextlib.suppress(TypeError, ValueError):
+                            expiration_days = round(int(prop.value) / 24)
 
                 # Determine status from expiration
                 if isinstance(expiration_days, int):
