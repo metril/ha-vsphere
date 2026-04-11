@@ -77,6 +77,20 @@
             "init": {
                 "title": "vSphere Options",
                 "description": "Configure monitoring categories and intervals."
+            },
+            "entity_selection": {
+                "title": "Entity Selection",
+                "description": "Select which {category} to monitor."
+            },
+            "restrictions": {
+                "title": "Operation Restrictions",
+                "description": "Block categories of operations globally.",
+                "data": {
+                    "block_destructive": "Block destructive operations (power off, shutdown, reset, remove snapshots)",
+                    "block_snapshots": "Block all snapshot operations",
+                    "block_migrate": "Block VM migration",
+                    "block_host_ops": "Block all host operations"
+                }
             }
         }
     }

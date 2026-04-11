@@ -23,7 +23,7 @@ Monitor and control VMware vSphere (ESXi and vCenter) infrastructure directly fr
 - **Selects** — VM snapshot management, host power policy
 
 ### Services
-Eight action services with device targeting and permission enforcement (see [Services Reference](#services-reference)).
+Nine action services with device targeting and permission enforcement (see [Services Reference](#services-reference)).
 
 ### HA Events
 Three event types fired on the HA event bus (see [Events](#ha-events)).
@@ -207,6 +207,18 @@ data:
 
 Response: `{ "hosts": [{ "moref": "host-10", "name": "esxi01.lab", "power_state": "poweredOn" }, ...] }`
 
+### `vsphere.vm_migrate`
+
+Migrate a VM to a different host (and optionally datastore).
+
+```yaml
+service: vsphere.vm_migrate
+data:
+  device_id: "abc123def456"
+  host_moref: "host-20"        # Target host MoRef
+  datastore_moref: "datastore-1"  # Optional target datastore MoRef
+```
+
 ### `vsphere.list_power_policies` (returns response)
 
 Return the available power policies for the target host device.
@@ -230,10 +242,12 @@ The integration includes a layered permission resolver that can block specific a
 
 1. Per-object per-action: `restrictions.{category}.{moref}.{action}`
 2. Per-object blanket: `restrictions.{category}.{moref}._all`
-3. Global per-action: `restrictions.global.{action}`
-4. Global shortcut group: `restrictions.global.{group_name}`
-5. Global nuclear switch: `restrictions.global._all`
-6. Default: **allowed**
+3. Per-category per-action: `restrictions.categories.{category}.{action}`
+4. Per-category blanket: `restrictions.categories.{category}._all`
+5. Global per-action: `restrictions.global.{action}`
+6. Global shortcut group: `restrictions.global.{group_name}`
+7. Global nuclear switch: `restrictions.global._all`
+8. Default: **allowed**
 
 ### Shortcut Groups
 
@@ -275,10 +289,16 @@ Fired when a vSphere alarm changes state.
 ```yaml
 event_type: vsphere_alarm_triggered
 data:
-  entry_id: "abc123"
-  alarm_name: "Host CPU Usage"
-  entity: "host-10"
-  status: "red"        # green | yellow | red
+  entry_id: "config_entry_id"
+  entity_type: "host"       # host, vm
+  entity_moref: "host-42"
+  entity_name: "esxi01"
+  alarm_key: "alarm-1.host-42"
+  alarm_name: "Host memory usage"
+  old_status: "green"       # null for first-seen (suppressed)
+  new_status: "red"         # green, yellow, red
+  time: "2026-04-11T13:24:48"
+  acknowledged: false
 ```
 
 ### `vsphere_event`
@@ -288,10 +308,13 @@ Fired for general vSphere task/event log entries.
 ```yaml
 event_type: vsphere_event
 data:
-  entry_id: "abc123"
-  event_type: "VmPoweredOnEvent"
-  message: "Virtual machine powered on"
-  created_time: "2026-04-11T12:00:00Z"
+  entry_id: "config_entry_id"
+  event_class: "VmPoweredOnEvent"
+  entity_type: "vm"
+  entity_moref: "vm-101"
+  entity_name: "web01"
+  message: "web01 is poweredOn"
+  time: "2026-04-11T13:25:01"
 ```
 
 ### `vsphere_inventory_change`
@@ -301,11 +324,11 @@ Fired when the inventory changes (VM or host added/removed).
 ```yaml
 event_type: vsphere_inventory_change
 data:
-  entry_id: "abc123"
-  change_type: "added"   # added | removed | updated
-  category: "vms"
-  moref: "vm-42"
-  name: "myvm"
+  entry_id: "config_entry_id"
+  action: "added"           # added, removed
+  entity_type: "vm"
+  entity_moref: "vm-205"
+  entity_name: "new-vm-01"  # only present for "added"
 ```
 
 ---

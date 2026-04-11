@@ -246,6 +246,50 @@ class TestGlobalAll:
 
 
 # ---------------------------------------------------------------------------
+# Per-category restrictions
+# ---------------------------------------------------------------------------
+
+
+class TestPermissionResolverCategoryLevel:
+    """Test per-category restrictions."""
+
+    def test_category_action_block(self):
+        restrictions = {
+            "categories": {
+                "vms": {"snapshot_create": True},
+            },
+        }
+        resolver = PermissionResolver(restrictions)
+        assert resolver.is_allowed("vms", "vm-101", "snapshot_create") is False
+        assert resolver.is_allowed("vms", "vm-101", "power_on") is True
+        assert resolver.is_allowed("hosts", "host-42", "shutdown") is True
+
+    def test_category_blanket_block(self):
+        restrictions = {
+            "categories": {
+                "vms": {"_all": True},
+            },
+        }
+        resolver = PermissionResolver(restrictions)
+        assert resolver.is_allowed("vms", "vm-101", "power_on") is False
+        assert resolver.is_allowed("vms", "vm-101", "reboot") is False
+        assert resolver.is_allowed("hosts", "host-42", "reboot") is True
+
+    def test_object_overrides_category(self):
+        restrictions = {
+            "categories": {
+                "vms": {"power_off": True},
+            },
+            "vms": {
+                "vm-101": {"power_off": False},  # explicitly allowed
+            },
+        }
+        resolver = PermissionResolver(restrictions)
+        assert resolver.is_allowed("vms", "vm-101", "power_off") is True  # object wins
+        assert resolver.is_allowed("vms", "vm-102", "power_off") is False  # category blocks
+
+
+# ---------------------------------------------------------------------------
 # explain()
 # ---------------------------------------------------------------------------
 

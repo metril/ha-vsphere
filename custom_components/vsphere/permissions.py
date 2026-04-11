@@ -3,10 +3,12 @@
 Resolution chain (most specific wins):
   1. restrictions.{category}["{moref}"].{action}   → per-object per-action
   2. restrictions.{category}["{moref}"]._all        → per-object blanket
-  3. restrictions.global.{action}                   → global per-action
-  4. restrictions.global.{group}                    → global shortcut groups
-  5. restrictions.global._all                       → nuclear switch
-  6. default: allowed
+  3. restrictions.categories.{category}.{action}   → per-category per-action
+  4. restrictions.categories.{category}._all        → per-category blanket
+  5. restrictions.global.{action}                   → global per-action
+  6. restrictions.global.{group}                    → global shortcut groups
+  7. restrictions.global._all                       → nuclear switch
+  8. default: allowed
 """
 
 from __future__ import annotations
@@ -81,6 +83,15 @@ class PermissionResolver:
             return f"blocked: {reason}"
         return f"allowed: {reason}"
 
+    def _explain_category(self, category: str, action: str) -> str | None:
+        """Return a per-category explanation if a category-level rule applies."""
+        cat_restrictions = self._restrictions.get("categories", {}).get(category, {})
+        if action in cat_restrictions:
+            return f"{action} is disabled for all {category} (per-category restriction)"
+        if "_all" in cat_restrictions:
+            return f"All operations are disabled for all {category} (per-category blanket restriction)"
+        return None
+
     # ------------------------------------------------------------------
     # Internal resolution logic
     # ------------------------------------------------------------------
@@ -92,6 +103,7 @@ class PermissionResolver:
         ``reason`` is a human-readable description of the deciding rule.
         """
         obj_rules: dict[str, Any] = self._restrictions.get(category, {}).get(moref, {})
+        cat_restrictions: dict[str, Any] = self._restrictions.get("categories", {}).get(category, {})
         global_rules: dict[str, Any] = self._restrictions.get("global", {})
 
         # ------------------------------------------------------------------
@@ -115,7 +127,25 @@ class PermissionResolver:
             return blocked, (f"{state} by per-object blanket rule (category={category}, moref={moref}, _all={value})")
 
         # ------------------------------------------------------------------
-        # Step 3: global per-action
+        # Step 3: per-category per-action
+        # ------------------------------------------------------------------
+        value = cat_restrictions.get(action, _UNSET)
+        if value is not _UNSET:
+            blocked = bool(value)
+            state = "blocked" if blocked else "allowed"
+            return blocked, (f"{state} by per-category per-action rule (category={category}, action={action})")
+
+        # ------------------------------------------------------------------
+        # Step 4: per-category blanket (_all)
+        # ------------------------------------------------------------------
+        value = cat_restrictions.get("_all", _UNSET)
+        if value is not _UNSET:
+            blocked = bool(value)
+            state = "blocked" if blocked else "allowed"
+            return blocked, (f"{state} by per-category blanket rule (category={category}, _all={value})")
+
+        # ------------------------------------------------------------------
+        # Step 5: global per-action
         # ------------------------------------------------------------------
         value = global_rules.get(action, _UNSET)
         if value is not _UNSET:
@@ -124,7 +154,7 @@ class PermissionResolver:
             return blocked, (f"{state} by global per-action rule (action={action})")
 
         # ------------------------------------------------------------------
-        # Step 4: global shortcut groups
+        # Step 6: global shortcut groups
         # ------------------------------------------------------------------
         for group_name, (cat_filter, action_set) in _SHORTCUT_GROUPS.items():
             # Skip this group if it is scoped to a specific category that
@@ -140,7 +170,7 @@ class PermissionResolver:
                 return blocked, (f"{state} by global shortcut group '{group_name}' (action={action})")
 
         # ------------------------------------------------------------------
-        # Step 5: global nuclear switch (_all)
+        # Step 7: global nuclear switch (_all)
         # ------------------------------------------------------------------
         value = global_rules.get("_all", _UNSET)
         if value is not _UNSET:
@@ -149,6 +179,6 @@ class PermissionResolver:
             return blocked, (f"{state} by global _all switch")
 
         # ------------------------------------------------------------------
-        # Step 6: default — allowed
+        # Step 8: default — allowed
         # ------------------------------------------------------------------
         return False, "allowed by default (no matching restriction)"
