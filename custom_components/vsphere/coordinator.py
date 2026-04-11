@@ -132,6 +132,12 @@ class VSpherePerfCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(str(err)) from err
 
     def _fetch_performance(self) -> dict[str, Any]:
-        """Placeholder — Phase 8 will implement QueryPerf."""
+        """Fetch performance data from PerformanceManager."""
         self._client.ensure_poll_connection()
-        return {}
+
+        # Get morefs of currently monitored objects from VSphereData
+        host_morefs = list(self._vsphere_data._data.get("hosts", {}).keys())  # noqa: SLF001
+        vm_morefs = list(self._vsphere_data._data.get("vms", {}).keys())  # noqa: SLF001
+        ds_morefs = list(self._vsphere_data._data.get("datastores", {}).keys())  # noqa: SLF001
+
+        return self._client.query_performance(host_morefs, vm_morefs, ds_morefs)

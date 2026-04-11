@@ -14,6 +14,7 @@ from homeassistant.components.sensor import (
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
+    UnitOfDataRate,
     UnitOfInformation,
     UnitOfTime,
 )
@@ -445,6 +446,105 @@ RESOURCE_POOL_SENSORS: tuple[VSphereSensorDescription, ...] = (
 )
 
 # ---------------------------------------------------------------------------
+# Host / VM performance sensors
+# ---------------------------------------------------------------------------
+
+HOST_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="perf_cpu_usage_pct",
+        translation_key="perf_cpu_usage_pct",
+        name="CPU Usage (Realtime)",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("cpu_usage_pct"),
+    ),
+    VSphereSensorDescription(
+        key="perf_mem_active_mb",
+        translation_key="perf_mem_active_mb",
+        name="Memory Active (Realtime)",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("mem_active_kb"),
+    ),
+    VSphereSensorDescription(
+        key="perf_net_received_mbps",
+        translation_key="perf_net_received_mbps",
+        name="Network Received (Realtime)",
+        device_class=SensorDeviceClass.DATA_RATE,
+        native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("net_received_kbps"),
+    ),
+    VSphereSensorDescription(
+        key="perf_net_transmitted_mbps",
+        translation_key="perf_net_transmitted_mbps",
+        name="Network Transmitted (Realtime)",
+        device_class=SensorDeviceClass.DATA_RATE,
+        native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("net_transmitted_kbps"),
+    ),
+    VSphereSensorDescription(
+        key="perf_disk_read_mbps",
+        translation_key="perf_disk_read_mbps",
+        name="Disk Read (Realtime)",
+        device_class=SensorDeviceClass.DATA_RATE,
+        native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("disk_read_kbps"),
+    ),
+    VSphereSensorDescription(
+        key="perf_disk_write_mbps",
+        translation_key="perf_disk_write_mbps",
+        name="Disk Write (Realtime)",
+        device_class=SensorDeviceClass.DATA_RATE,
+        native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("disk_write_kbps"),
+    ),
+)
+
+VM_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = HOST_PERF_SENSORS
+
+# ---------------------------------------------------------------------------
+# Datastore performance sensors
+# ---------------------------------------------------------------------------
+
+DATASTORE_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="perf_read_latency_ms",
+        translation_key="perf_read_latency_ms",
+        name="Read Latency (Realtime)",
+        native_unit_of_measurement=UnitOfTime.MILLISECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("read_latency_ms"),
+    ),
+    VSphereSensorDescription(
+        key="perf_write_latency_ms",
+        translation_key="perf_write_latency_ms",
+        name="Write Latency (Realtime)",
+        native_unit_of_measurement=UnitOfTime.MILLISECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("write_latency_ms"),
+    ),
+    VSphereSensorDescription(
+        key="perf_read_iops",
+        translation_key="perf_read_iops",
+        name="Read IOPS (Realtime)",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("read_iops"),
+    ),
+    VSphereSensorDescription(
+        key="perf_write_iops",
+        translation_key="perf_write_iops",
+        name="Write IOPS (Realtime)",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("write_iops"),
+    ),
+)
+
+# ---------------------------------------------------------------------------
 # Sensor map: category → (descriptions, coordinator data key)
 # ---------------------------------------------------------------------------
 
@@ -468,7 +568,7 @@ async def async_setup_entry(
     coordinator: VSphereData = data["coordinator"]
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
 
-    entities: list[VSphereSensor] = []
+    entities: list[VSphereSensor | VSpherePerfSensor] = []
 
     for category, (descriptions, data_key) in SENSOR_MAP.items():
         if not categories.get(category):
@@ -510,6 +610,21 @@ async def async_setup_entry(
                     )
                 )
 
+    # Performance sensors — only created when performance category is enabled
+    if categories.get("performance"):
+        for moref, obj_data in coordinator.data.get("hosts", {}).items():
+            name = obj_data.get("name", moref)
+            for desc in HOST_PERF_SENSORS:
+                entities.append(VSpherePerfSensor(coordinator, entry, "hosts", moref, name, desc))
+        for moref, obj_data in coordinator.data.get("vms", {}).items():
+            name = obj_data.get("name", moref)
+            for desc in VM_PERF_SENSORS:
+                entities.append(VSpherePerfSensor(coordinator, entry, "vms", moref, name, desc))
+        for moref, obj_data in coordinator.data.get("datastores", {}).items():
+            name = obj_data.get("name", moref)
+            for desc in DATASTORE_PERF_SENSORS:
+                entities.append(VSpherePerfSensor(coordinator, entry, "datastores", moref, name, desc))
+
     async_add_entities(entities)
 
 
@@ -539,3 +654,31 @@ class VSphereSensor(VSphereEntity, SensorEntity):
         if obj_data is None:
             return None
         return self.entity_description.value_fn(obj_data)
+
+
+class VSpherePerfSensor(VSphereEntity, SensorEntity):
+    """Sensor that reads from PerformanceManager polled data."""
+
+    entity_description: VSphereSensorDescription
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        object_type: str,
+        moref: str,
+        name: str,
+        description: VSphereSensorDescription,
+    ) -> None:
+        """Initialize the performance sensor."""
+        super().__init__(coordinator, entry, object_type, moref, name)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{moref}_{description.key}"
+
+    @property
+    def native_value(self) -> Any:
+        """Return the sensor value from performance data."""
+        if not self.coordinator.data:
+            return None
+        perf_data = self.coordinator.data.get("perf", {}).get(self._moref, {})
+        return self.entity_description.value_fn(perf_data)

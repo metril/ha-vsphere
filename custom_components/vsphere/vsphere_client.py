@@ -462,6 +462,173 @@ class VSphereClient:
         raise VSphereOperationError(f"Host with MoRef '{moref}' not found")
 
     # ------------------------------------------------------------------
+    # Performance metrics
+    # ------------------------------------------------------------------
+
+    def query_performance(
+        self,
+        host_morefs: list[str],
+        vm_morefs: list[str],
+        datastore_morefs: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Query performance counters for hosts, VMs, and datastores.
+
+        Returns dict keyed by moref with counter values.
+        Uses the PerformanceManager's QueryPerf API with 20-second interval.
+        """
+        self.ensure_poll_connection()
+        content = self._poll_conn.RetrieveContent()
+        perf_manager = content.perfManager
+
+        if not perf_manager:
+            return {}
+
+        # Get counter IDs for the metrics we care about
+        counter_ids = self._get_counter_ids(perf_manager)
+        if not counter_ids:
+            return {}
+
+        results: dict[str, dict[str, Any]] = {}
+
+        # Query hosts
+        for moref in host_morefs:
+            try:
+                host_obj = self._get_managed_object(vim.HostSystem, moref)
+                if host_obj:
+                    data = self._query_entity_perf(perf_manager, host_obj, counter_ids, "host")
+                    if data:
+                        results[moref] = data
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Failed to query perf for host %s", moref, exc_info=True)
+
+        # Query VMs
+        for moref in vm_morefs:
+            try:
+                vm_obj = self._get_managed_object(vim.VirtualMachine, moref)
+                if vm_obj:
+                    data = self._query_entity_perf(perf_manager, vm_obj, counter_ids, "vm")
+                    if data:
+                        results[moref] = data
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Failed to query perf for VM %s", moref, exc_info=True)
+
+        # Query datastores
+        for moref in datastore_morefs:
+            try:
+                ds_obj = self._get_managed_object(vim.Datastore, moref)
+                if ds_obj:
+                    data = self._query_entity_perf(perf_manager, ds_obj, counter_ids, "datastore")
+                    if data:
+                        results[moref] = data
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Failed to query perf for datastore %s", moref, exc_info=True)
+
+        return results
+
+    def _get_counter_ids(self, perf_manager: Any) -> dict[str, int]:
+        """Build a mapping of counter name → counter ID."""
+        counters = {}
+        for counter in perf_manager.perfCounter:
+            group = counter.groupInfo.key
+            name = counter.nameInfo.key
+            rollup = counter.rollupType
+            key = f"{group}.{name}.{rollup}"
+            counters[key] = counter.key
+        return counters
+
+    def _get_managed_object(self, obj_type: type, moref: str) -> Any | None:
+        """Get a managed object by type and MoRef string."""
+        content = self._poll_conn.RetrieveContent()
+        container = content.viewManager.CreateContainerView(content.rootFolder, [obj_type], True)
+        try:
+            for obj in container.view:
+                if str(obj._moId) == moref:  # noqa: SLF001
+                    return obj
+        finally:
+            container.Destroy()
+        return None
+
+    def _query_entity_perf(
+        self,
+        perf_manager: Any,
+        entity: Any,
+        counter_ids: dict[str, int],
+        entity_type: str,
+    ) -> dict[str, Any]:
+        """Query performance counters for a single entity."""
+        # Define which counters to query per entity type
+        if entity_type in ("host", "vm"):
+            wanted = {
+                "cpu.usage.average": "cpu_usage_pct",
+                "mem.active.average": "mem_active_kb",
+                "net.received.average": "net_received_kbps",
+                "net.transmitted.average": "net_transmitted_kbps",
+                "disk.read.average": "disk_read_kbps",
+                "disk.write.average": "disk_write_kbps",
+            }
+        elif entity_type == "datastore":
+            wanted = {
+                "datastore.totalReadLatency.average": "read_latency_ms",
+                "datastore.totalWriteLatency.average": "write_latency_ms",
+                "datastore.numberReadAveraged.average": "read_iops",
+                "datastore.numberWriteAveraged.average": "write_iops",
+            }
+        else:
+            return {}
+
+        # Build metric IDs list
+        metric_ids = []
+        counter_key_map: dict[int, str] = {}
+        for counter_name, result_key in wanted.items():
+            cid = counter_ids.get(counter_name)
+            if cid is not None:
+                metric_id = vim.PerformanceManager.MetricId(counterId=cid, instance="")
+                metric_ids.append(metric_id)
+                counter_key_map[cid] = result_key
+
+        if not metric_ids:
+            return {}
+
+        # Build query spec — get the latest single sample (interval 20 = realtime)
+        query_spec = vim.PerformanceManager.QuerySpec(
+            entity=entity,
+            metricId=metric_ids,
+            maxSample=1,
+            intervalId=20,  # 20-second realtime interval
+        )
+
+        try:
+            perf_results = perf_manager.QueryPerf(querySpec=[query_spec])
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("QueryPerf failed for %s", entity, exc_info=True)
+            return {}
+
+        if not perf_results:
+            return {}
+
+        data: dict[str, Any] = {}
+        for result in perf_results:
+            for val in result.value:
+                result_key = counter_key_map.get(val.id.counterId)
+                if result_key and val.value:
+                    raw_value = val.value[-1]  # Latest sample
+                    # Apply unit conversions
+                    if result_key == "cpu_usage_pct":
+                        data[result_key] = round(raw_value / 100, 2)  # hundredths of % → %
+                    elif result_key.endswith("_kb"):
+                        data[result_key] = round(raw_value / 1024, 2)  # KB → MB
+                    elif result_key.endswith("_kbps"):
+                        data[result_key] = round(raw_value / 1024, 2)  # KBps → MBps
+                    elif result_key.endswith("_ms"):
+                        data[result_key] = raw_value  # already ms
+                    elif result_key.endswith("_iops"):
+                        data[result_key] = raw_value  # already count/sec
+                    else:
+                        data[result_key] = raw_value
+
+        return data
+
+    # ------------------------------------------------------------------
     # Task management
     # ------------------------------------------------------------------
 
