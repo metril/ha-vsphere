@@ -465,7 +465,7 @@ HOST_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = (
         device_class=SensorDeviceClass.DATA_SIZE,
         native_unit_of_measurement=UnitOfInformation.MEGABYTES,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: d.get("mem_active_kb"),
+        value_fn=lambda d: d.get("mem_active_mb"),
     ),
     VSphereSensorDescription(
         key="perf_net_received_mbps",
@@ -474,7 +474,7 @@ HOST_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = (
         device_class=SensorDeviceClass.DATA_RATE,
         native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: d.get("net_received_kbps"),
+        value_fn=lambda d: d.get("net_received_mbps"),
     ),
     VSphereSensorDescription(
         key="perf_net_transmitted_mbps",
@@ -483,7 +483,7 @@ HOST_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = (
         device_class=SensorDeviceClass.DATA_RATE,
         native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: d.get("net_transmitted_kbps"),
+        value_fn=lambda d: d.get("net_transmitted_mbps"),
     ),
     VSphereSensorDescription(
         key="perf_disk_read_mbps",
@@ -492,7 +492,7 @@ HOST_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = (
         device_class=SensorDeviceClass.DATA_RATE,
         native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: d.get("disk_read_kbps"),
+        value_fn=lambda d: d.get("disk_read_mbps"),
     ),
     VSphereSensorDescription(
         key="perf_disk_write_mbps",
@@ -501,7 +501,7 @@ HOST_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = (
         device_class=SensorDeviceClass.DATA_RATE,
         native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: d.get("disk_write_kbps"),
+        value_fn=lambda d: d.get("disk_write_mbps"),
     ),
 )
 

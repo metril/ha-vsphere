@@ -157,7 +157,6 @@ class _VSphereButton(VSphereEntity, ButtonEntity):
     ) -> None:
         """Initialize the button."""
         super().__init__(coordinator, entry, object_type, moref, name)
-        self._moref = moref
         self._client = client
         self._resolver = resolver
         self._attr_unique_id = f"{entry.entry_id}_{moref}_{self._unique_id_suffix}"
@@ -190,6 +189,8 @@ class HostRebootButton(_VSphereButton):
 
     async def async_press(self) -> None:
         """Reboot the host."""
+        if not self._resolver.is_allowed("hosts", self._moref, HostAction.REBOOT):
+            raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.REBOOT))
         try:
             await self.hass.async_add_executor_job(self._client.host_power, self._moref, "reboot")
         except VSphereOperationError as err:
@@ -218,6 +219,8 @@ class VmRebootButton(_VSphereButton):
 
     async def async_press(self) -> None:
         """Reboot the VM."""
+        if not self._resolver.is_allowed("vms", self._moref, VmAction.REBOOT):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.REBOOT))
         try:
             await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "reboot")
         except VSphereOperationError as err:
@@ -246,6 +249,8 @@ class VmResetButton(_VSphereButton):
 
     async def async_press(self) -> None:
         """Hard-reset the VM."""
+        if not self._resolver.is_allowed("vms", self._moref, VmAction.RESET):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.RESET))
         try:
             await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "reset")
         except VSphereOperationError as err:
@@ -273,6 +278,8 @@ class VmSnapshotCreateButton(_VSphereButton):
 
     async def async_press(self) -> None:
         """Create a snapshot of the VM."""
+        if not self._resolver.is_allowed("vms", self._moref, VmAction.SNAPSHOT_CREATE):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SNAPSHOT_CREATE))
         try:
             await self.hass.async_add_executor_job(self._client.create_snapshot, self._moref)
         except VSphereOperationError as err:
@@ -300,6 +307,8 @@ class VmSnapshotRemoveAllButton(_VSphereButton):
 
     async def async_press(self) -> None:
         """Remove all snapshots from the VM."""
+        if not self._resolver.is_allowed("vms", self._moref, VmAction.SNAPSHOT_REMOVE):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SNAPSHOT_REMOVE))
         try:
             await self.hass.async_add_executor_job(self._client.remove_snapshot, self._moref, SNAP_ALL)
         except VSphereOperationError as err:
@@ -327,6 +336,8 @@ class VmSnapshotRemoveFirstButton(_VSphereButton):
 
     async def async_press(self) -> None:
         """Remove the oldest snapshot from the VM."""
+        if not self._resolver.is_allowed("vms", self._moref, VmAction.SNAPSHOT_REMOVE):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SNAPSHOT_REMOVE))
         try:
             await self.hass.async_add_executor_job(self._client.remove_snapshot, self._moref, SNAP_FIRST)
         except VSphereOperationError as err:
@@ -354,6 +365,8 @@ class VmSnapshotRemoveLastButton(_VSphereButton):
 
     async def async_press(self) -> None:
         """Remove the newest snapshot from the VM."""
+        if not self._resolver.is_allowed("vms", self._moref, VmAction.SNAPSHOT_REMOVE):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SNAPSHOT_REMOVE))
         try:
             await self.hass.async_add_executor_job(self._client.remove_snapshot, self._moref, SNAP_LAST)
         except VSphereOperationError as err:

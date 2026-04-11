@@ -224,6 +224,8 @@ class VSphereClient:
                         if summary.capacity and summary.freeSpace is not None
                         else 0.0,
                         "url": summary.url or "",
+                        "connected_hosts": len(ds.host) if ds.host else 0,
+                        "virtual_machines": len(ds.vm) if ds.vm else 0,
                     }
                 except Exception:  # noqa: BLE001
                     _LOGGER.debug("Error parsing datastore %s", moref, exc_info=True)
@@ -622,11 +624,11 @@ class VSphereClient:
         if entity_type in ("host", "vm"):
             wanted = {
                 "cpu.usage.average": "cpu_usage_pct",
-                "mem.active.average": "mem_active_kb",
-                "net.received.average": "net_received_kbps",
-                "net.transmitted.average": "net_transmitted_kbps",
-                "disk.read.average": "disk_read_kbps",
-                "disk.write.average": "disk_write_kbps",
+                "mem.active.average": "mem_active_mb",
+                "net.received.average": "net_received_mbps",
+                "net.transmitted.average": "net_transmitted_mbps",
+                "disk.read.average": "disk_read_mbps",
+                "disk.write.average": "disk_write_mbps",
             }
         elif entity_type == "datastore":
             wanted = {
@@ -677,9 +679,9 @@ class VSphereClient:
                     # Apply unit conversions
                     if result_key == "cpu_usage_pct":
                         data[result_key] = round(raw_value / 100, 2)  # hundredths of % → %
-                    elif result_key.endswith("_kb"):
+                    elif result_key.endswith("_mb"):
                         data[result_key] = round(raw_value / 1024, 2)  # KB → MB
-                    elif result_key.endswith("_kbps"):
+                    elif result_key.endswith("_mbps"):
                         data[result_key] = round(raw_value / 1024, 2)  # KBps → MBps
                     elif result_key.endswith("_ms"):
                         data[result_key] = raw_value  # already ms

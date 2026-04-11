@@ -96,7 +96,6 @@ class VmPowerSwitch(VSphereEntity, SwitchEntity):
     ) -> None:
         """Initialize the VM power switch."""
         super().__init__(coordinator, entry, "vms", moref, name)
-        self._moref = moref
         self._client = client
         self._resolver = resolver
         self._attr_unique_id = f"{entry.entry_id}_{moref}_power_switch"
@@ -152,7 +151,6 @@ class HostMaintenanceSwitch(VSphereEntity, SwitchEntity):
     ) -> None:
         """Initialize the host maintenance mode switch."""
         super().__init__(coordinator, entry, "hosts", moref, name)
-        self._moref = moref
         self._client = client
         self._resolver = resolver
         self._attr_unique_id = f"{entry.entry_id}_{moref}_maintenance_switch"

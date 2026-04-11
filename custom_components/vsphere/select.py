@@ -78,7 +78,6 @@ class HostPowerPolicySelect(VSphereEntity, SelectEntity):
     ) -> None:
         """Initialize the host power policy select."""
         super().__init__(coordinator, entry, "hosts", moref, name)
-        self._moref = moref
         self._client = client
         self._resolver = resolver
         self._attr_unique_id = f"{entry.entry_id}_{moref}_power_policy"

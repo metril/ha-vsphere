@@ -57,6 +57,7 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
             "alarms": {},
             "perf": {},
             "connection_info": {},
+            "storage_advanced": {},
         }
         self.data = self._data
 
