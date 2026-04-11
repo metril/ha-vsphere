@@ -468,12 +468,22 @@ class VSphereClient:
             for obj_type, category in [
                 (vim.HostSystem, "host"),
                 (vim.VirtualMachine, "vm"),
+                (vim.Datastore, "datastore"),
+                (vim.ClusterComputeResource, "cluster"),
+                (vim.ResourcePool, "resource_pool"),
             ]:
                 view = self._get_container_view(conn, [obj_type])
                 for obj in view.view:
                     moref = obj._moId  # noqa: SLF001
                     try:
-                        name = obj.summary.config.name
+                        # Different object types expose their name in different places
+                        summary_config = getattr(getattr(obj, "summary", None), "config", None)
+                        if summary_config is not None and hasattr(summary_config, "name"):
+                            name = summary_config.name
+                        elif hasattr(obj, "name"):
+                            name = obj.name
+                        else:
+                            name = moref
                     except Exception:  # noqa: BLE001
                         name = moref
                     result[moref] = {"moref": moref, "name": name, "type": category}

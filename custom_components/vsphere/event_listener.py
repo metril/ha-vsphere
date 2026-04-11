@@ -312,9 +312,19 @@ class VSphereEventListener:
         old_alarms = self._vsphere_data._data.get("alarms", {}).get(moref, [])  # noqa: SLF001
         old_statuses = {a.get("alarm_key"): a.get("status") for a in old_alarms}
 
-        # Fire events for changed alarms
+        # Look up entity name from coordinator data
+        category = f"{entity_type}s"  # "host" → "hosts", "vm" → "vms"
+        entity_name: str = (
+            self._vsphere_data._data.get(category, {}).get(moref, {}).get("name", moref)  # noqa: SLF001
+        )
+
+        # Fire events for changed alarms — skip first-seen (no prior record) to avoid
+        # spurious events on initial load
         for alarm in alarms:
             old_status = old_statuses.get(alarm["alarm_key"])
+            # Skip alarms that have no prior state — these are first-seen during initial load
+            if old_status is None:
+                continue
             if old_status != alarm["status"]:
                 self._fire_event(
                     "vsphere_alarm_triggered",
@@ -322,9 +332,10 @@ class VSphereEventListener:
                         "entry_id": self._entry_id,
                         "entity_type": entity_type,
                         "entity_moref": moref,
+                        "entity_name": entity_name,
                         "alarm_key": alarm["alarm_key"],
                         "alarm_name": alarm["alarm_name"],
-                        "old_status": old_status or "green",
+                        "old_status": old_status,
                         "new_status": alarm["status"],
                         "time": alarm["time"],
                         "acknowledged": alarm["acknowledged"],

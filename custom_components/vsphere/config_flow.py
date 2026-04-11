@@ -56,6 +56,9 @@ _LOGGER = logging.getLogger(__name__)
 _FILTERABLE_CATEGORIES: list[Category] = [
     Category.HOSTS,
     Category.VMS,
+    Category.DATASTORES,
+    Category.CLUSTERS,
+    Category.RESOURCE_POOLS,
 ]
 
 
@@ -215,6 +218,9 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         type_map: dict[Category, str] = {
             Category.HOSTS: "host",
             Category.VMS: "vm",
+            Category.DATASTORES: "datastore",
+            Category.CLUSTERS: "cluster",
+            Category.RESOURCE_POOLS: "resource_pool",
         }
         obj_type = type_map.get(category, "")
         options: list[SelectOptionDict] = [
@@ -381,6 +387,20 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
 class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
     """Options flow for vSphere Control."""
 
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Initialize the options flow."""
+        super().__init__(config_entry)
+        self._new_categories: dict[str, bool] = {}
+        self._new_perf_interval: int = DEFAULT_PERF_INTERVAL
+        self._inventory: dict[str, dict[str, Any]] = {}
+        self._filterable_remaining: list[Category] = []
+        self._current_filter_category: Category | None = None
+        self._entity_filter: dict[str, Any] = {}
+
+    # ------------------------------------------------------------------
+    # Step 1: init — category toggles + perf interval
+    # ------------------------------------------------------------------
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the options flow entry point."""
         current_options = dict(self.config_entry.options)
@@ -388,15 +408,11 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         current_perf_interval: int = current_options.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)
 
         if user_input is not None:
-            categories = {cat.value: user_input.get(cat.value, False) for cat in Category}
-            perf_interval = int(user_input.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL))
-            return self.async_create_entry(
-                data={
-                    **current_options,
-                    CONF_CATEGORIES: categories,
-                    CONF_PERF_INTERVAL: perf_interval,
-                }
-            )
+            self._new_categories = {cat.value: user_input.get(cat.value, False) for cat in Category}
+            self._new_perf_interval = int(user_input.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL))
+            # Preserve existing entity filter, will be updated in entity_selection step
+            self._entity_filter = dict(current_options.get(CONF_ENTITY_FILTER, {}))
+            return await self._start_entity_selection()
 
         schema_fields: dict[Any, Any] = {
             vol.Required(cat.value, default=current_categories.get(cat.value, False)): BooleanSelector()
@@ -415,4 +431,143 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(schema_fields),
+        )
+
+    # ------------------------------------------------------------------
+    # Step 2: entity_selection — per-category object selection
+    # ------------------------------------------------------------------
+
+    async def _start_entity_selection(self) -> ConfigFlowResult:
+        """Enumerate inventory and start per-category entity selection."""
+        entry_data: dict[str, Any] = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
+        client = entry_data.get("client")
+        if client is not None:
+            try:
+                self._inventory = await self.hass.async_add_executor_job(client.enumerate_inventory)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Could not enumerate inventory in options flow; skipping entity selection")
+                self._inventory = {}
+        else:
+            self._inventory = {}
+
+        # Only iterate categories that are newly enabled
+        self._filterable_remaining = [
+            cat for cat in _FILTERABLE_CATEGORIES if self._new_categories.get(cat.value, False)
+        ]
+        return await self._next_entity_selection_step()
+
+    async def _next_entity_selection_step(self) -> ConfigFlowResult:
+        """Advance to the next filterable category, or move to restrictions."""
+        if not self._filterable_remaining:
+            return await self.async_step_restrictions()
+
+        self._current_filter_category = self._filterable_remaining.pop(0)
+        return await self.async_step_entity_selection()
+
+    async def async_step_entity_selection(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle entity selection for the current filterable category."""
+        category = self._current_filter_category
+        if category is None:
+            return await self.async_step_restrictions()
+
+        if user_input is not None:
+            select_all: bool = user_input.get("select_all", True)
+            if select_all:
+                self._entity_filter[category.value] = {"mode": FILTER_MODE_ALL}
+            else:
+                selected: list[str] = user_input.get("selected_objects", [])
+                self._entity_filter[category.value] = {
+                    "mode": FILTER_MODE_SELECT,
+                    "morefs": selected,
+                }
+            return await self._next_entity_selection_step()
+
+        type_map: dict[Category, str] = {
+            Category.HOSTS: "host",
+            Category.VMS: "vm",
+            Category.DATASTORES: "datastore",
+            Category.CLUSTERS: "cluster",
+            Category.RESOURCE_POOLS: "resource_pool",
+        }
+        obj_type = type_map.get(category, "")
+        options: list[SelectOptionDict] = [
+            SelectOptionDict(value=moref, label=info.get("name", moref))
+            for moref, info in self._inventory.items()
+            if info.get("type") == obj_type
+        ]
+
+        # Determine existing defaults for this category
+        existing_filter = self._entity_filter.get(category.value, {})
+        default_select_all = existing_filter.get("mode", FILTER_MODE_ALL) == FILTER_MODE_ALL
+        default_selected = existing_filter.get("morefs", [])
+
+        data_schema = vol.Schema(
+            {
+                vol.Required("select_all", default=default_select_all): BooleanSelector(),
+                vol.Optional("selected_objects", default=default_selected): SelectSelector(
+                    SelectSelectorConfig(
+                        options=options,
+                        multiple=True,
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="entity_selection",
+            data_schema=data_schema,
+            description_placeholders={"category": category.value},
+        )
+
+    # ------------------------------------------------------------------
+    # Step 3: restrictions — global restriction shortcuts
+    # ------------------------------------------------------------------
+
+    async def async_step_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle global operation restriction shortcuts."""
+        current_options = dict(self.config_entry.options)
+        current_restrictions: dict[str, Any] = current_options.get(CONF_RESTRICTIONS, {})
+
+        if user_input is not None:
+            restrictions = {
+                "block_destructive": user_input.get("block_destructive", False),
+                "block_snapshots": user_input.get("block_snapshots", False),
+                "block_migrate": user_input.get("block_migrate", False),
+                "block_host_ops": user_input.get("block_host_ops", False),
+            }
+            return self.async_create_entry(
+                data={
+                    **current_options,
+                    CONF_CATEGORIES: self._new_categories,
+                    CONF_PERF_INTERVAL: self._new_perf_interval,
+                    CONF_ENTITY_FILTER: self._entity_filter,
+                    CONF_RESTRICTIONS: restrictions,
+                }
+            )
+
+        data_schema = vol.Schema(
+            {
+                vol.Required(
+                    "block_destructive",
+                    default=current_restrictions.get("block_destructive", False),
+                ): BooleanSelector(),
+                vol.Required(
+                    "block_snapshots",
+                    default=current_restrictions.get("block_snapshots", False),
+                ): BooleanSelector(),
+                vol.Required(
+                    "block_migrate",
+                    default=current_restrictions.get("block_migrate", False),
+                ): BooleanSelector(),
+                vol.Required(
+                    "block_host_ops",
+                    default=current_restrictions.get("block_host_ops", False),
+                ): BooleanSelector(),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="restrictions",
+            data_schema=data_schema,
         )

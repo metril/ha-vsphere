@@ -186,7 +186,7 @@ async def _handle_vm_power(call: ServiceCall) -> None:
     client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
 
     if resolver is not None and not resolver.is_allowed("vms", moref, action):
-        raise HomeAssistantError(f"Action '{action}' on VM '{moref}' is blocked by permission restrictions")
+        raise HomeAssistantError(resolver.explain("vms", moref, action))
 
     try:
         await hass.async_add_executor_job(client.vm_power, moref, action)
@@ -204,7 +204,7 @@ async def _handle_host_power(call: ServiceCall) -> None:
     client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
 
     if resolver is not None and not resolver.is_allowed("hosts", moref, action):
-        raise HomeAssistantError(f"Action '{action}' on host '{moref}' is blocked by permission restrictions")
+        raise HomeAssistantError(resolver.explain("hosts", moref, action))
 
     try:
         await hass.async_add_executor_job(client.host_power, moref, action, force)
@@ -221,9 +221,7 @@ async def _handle_host_power_policy(call: ServiceCall) -> None:
     client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
 
     if resolver is not None and not resolver.is_allowed("hosts", moref, HostAction.POWER_POLICY):
-        raise HomeAssistantError(
-            f"Action '{HostAction.POWER_POLICY}' on host '{moref}' is blocked by permission restrictions"
-        )
+        raise HomeAssistantError(resolver.explain("hosts", moref, HostAction.POWER_POLICY))
 
     try:
         await hass.async_add_executor_job(client.host_set_power_policy, moref, policy)
@@ -240,9 +238,7 @@ async def _handle_host_maintenance_mode(call: ServiceCall) -> None:
     client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
 
     if resolver is not None and not resolver.is_allowed("hosts", moref, HostAction.MAINTENANCE):
-        raise HomeAssistantError(
-            f"Action '{HostAction.MAINTENANCE}' on host '{moref}' is blocked by permission restrictions"
-        )
+        raise HomeAssistantError(resolver.explain("hosts", moref, HostAction.MAINTENANCE))
 
     try:
         await hass.async_add_executor_job(client.host_set_maintenance_mode, moref, enable)
@@ -262,9 +258,7 @@ async def _handle_create_snapshot(call: ServiceCall) -> None:
     client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
 
     if resolver is not None and not resolver.is_allowed("vms", moref, VmAction.SNAPSHOT_CREATE):
-        raise HomeAssistantError(
-            f"Action '{VmAction.SNAPSHOT_CREATE}' on VM '{moref}' is blocked by permission restrictions"
-        )
+        raise HomeAssistantError(resolver.explain("vms", moref, VmAction.SNAPSHOT_CREATE))
 
     try:
         await hass.async_add_executor_job(client.create_snapshot, moref, name, description, memory, quiesce)
@@ -281,9 +275,7 @@ async def _handle_remove_snapshot(call: ServiceCall) -> None:
     client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
 
     if resolver is not None and not resolver.is_allowed("vms", moref, VmAction.SNAPSHOT_REMOVE):
-        raise HomeAssistantError(
-            f"Action '{VmAction.SNAPSHOT_REMOVE}' on VM '{moref}' is blocked by permission restrictions"
-        )
+        raise HomeAssistantError(resolver.explain("vms", moref, VmAction.SNAPSHOT_REMOVE))
 
     try:
         await hass.async_add_executor_job(client.remove_snapshot, moref, which)
