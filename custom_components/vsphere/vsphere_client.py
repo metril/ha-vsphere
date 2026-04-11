@@ -1151,20 +1151,61 @@ class VSphereClient:
         filter_spec = vmodl.query.PropertyCollector.FilterSpec()
         prop_specs: list[Any] = []
 
+        # Build base property lists for each watchable category
+        host_props = ["summary.runtime.powerState", "summary.config.name"]
+        vm_props = ["summary.runtime.powerState", "summary.config.name", "runtime.powerState"]
+
+        # If events/alarms monitoring is on, also watch triggeredAlarmState on hosts and VMs
+        if categories.get("events_alarms"):
+            if "triggeredAlarmState" not in host_props:
+                host_props = [*host_props, "triggeredAlarmState"]
+            if "triggeredAlarmState" not in vm_props:
+                vm_props = [*vm_props, "triggeredAlarmState"]
+
         type_map: dict[str, tuple[Any, list[str]]] = {
             "hosts": (
                 vim.HostSystem,
-                ["summary.runtime.powerState", "summary.config.name"],
+                host_props,
             ),
             "vms": (
                 vim.VirtualMachine,
-                ["summary.runtime.powerState", "summary.config.name", "runtime.powerState"],
+                vm_props,
             ),
             "datastores": (
                 vim.Datastore,
                 ["summary.accessible", "summary.freeSpace"],
             ),
+            "clusters": (
+                vim.ClusterComputeResource,
+                [
+                    "name",
+                    "configuration.drsConfig.enabled",
+                    "configuration.drsConfig.defaultVmBehavior",
+                    "configuration.dasConfig.enabled",
+                    "configuration.dasConfig.admissionControlEnabled",
+                    "summary.numHosts",
+                    "summary.numEffectiveHosts",
+                    "summary.totalCpu",
+                    "summary.totalMemory",
+                    "host",
+                ],
+            ),
+            "resource_pools": (
+                vim.ResourcePool,
+                [
+                    "name",
+                    "config.cpuAllocation.reservation",
+                    "config.cpuAllocation.limit",
+                    "config.memoryAllocation.reservation",
+                    "config.memoryAllocation.limit",
+                    "vm",
+                ],
+            ),
         }
+
+        # Also include hosts/vms with only triggeredAlarmState when events_alarms is on
+        # but those categories are not being watched — tracked in type_map above via the
+        # dynamically extended host_props/vm_props lists.
 
         for category in categories:
             if category not in type_map:
@@ -1188,6 +1229,29 @@ class VSphereClient:
             prop_spec.all = False
             prop_spec.pathSet = props
             prop_specs.append(prop_spec)
+
+        # When events_alarms is enabled but hosts/vms are not in categories,
+        # add them with just triggeredAlarmState so alarm changes are still watched.
+        if categories.get("events_alarms"):
+            for category, obj_type in [("hosts", vim.HostSystem), ("vms", vim.VirtualMachine)]:
+                if not categories.get(category):
+                    traversal_spec = vmodl.query.PropertyCollector.TraversalSpec()
+                    traversal_spec.name = f"traversal_{category}_alarms"
+                    traversal_spec.type = vim.Folder
+                    traversal_spec.path = "childEntity"
+                    traversal_spec.skip = False
+
+                    obj_spec = vmodl.query.PropertyCollector.ObjectSpec()
+                    obj_spec.obj = content.rootFolder
+                    obj_spec.skip = True
+                    obj_spec.selectSet = [traversal_spec]
+                    obj_specs.append(obj_spec)
+
+                    prop_spec = vmodl.query.PropertyCollector.PropertySpec()
+                    prop_spec.type = obj_type
+                    prop_spec.all = False
+                    prop_spec.pathSet = ["triggeredAlarmState"]
+                    prop_specs.append(prop_spec)
 
         filter_spec.objectSet = obj_specs
         filter_spec.propSet = prop_specs

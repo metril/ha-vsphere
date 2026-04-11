@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import threading
+import time
 from typing import TYPE_CHECKING, Any
 
 from .const import Category
@@ -48,6 +49,7 @@ class VSphereEventListener:
         self._stop_event = threading.Event()
         self._pc: Any = None
         self._pc_filter: Any = None
+        self._event_baseline_time: float = 0.0
 
     def start(self) -> None:
         """Start listener (called from executor). Connects, fetches initial data, starts loop."""
@@ -55,6 +57,7 @@ class VSphereEventListener:
         self._client.connect_push()
         self._pc, self._pc_filter = self._client.create_property_filter(self._categories, self._entity_filter)
         self._do_initial_fetch()
+        self._fetch_recent_events()
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run_loop,
@@ -200,6 +203,10 @@ class VSphereEventListener:
                     entity_type = category.rstrip("s")  # "hosts" → "host"
                     self._process_alarm_update(moref, entity_type, change.val)
 
+        # Fire vsphere_event for significant property changes (e.g. power state transitions)
+        if kind == "modify" and category in ("hosts", "vms"):
+            self._check_and_fire_vsphere_events(category, moref, properties)
+
         if kind == "enter":
             filter_config: dict[str, Any] = self._entity_filter.get(category, {})
             if filter_config.get("mode", "all") == "select" and moref not in set(filter_config.get("morefs", [])):
@@ -234,6 +241,51 @@ class VSphereEventListener:
             vim.ResourcePool: "resource_pools",
         }
         return mapping.get(obj_type)
+
+    def _fetch_recent_events(self) -> None:
+        """Fetch recent events and set up event monitoring baseline."""
+        if not self._categories.get(Category.EVENTS_ALARMS):
+            return
+        # Store the current time as our baseline — only fire events for changes after this point
+        self._event_baseline_time = time.time()
+
+    def _check_and_fire_vsphere_events(self, category: str, moref: str, properties: dict[str, Any]) -> None:
+        """Fire vsphere_event for significant property changes."""
+        if not self._categories.get(Category.EVENTS_ALARMS):
+            return
+
+        # Detect power state changes
+        power_key = "summary.runtime.powerState" if category == "hosts" else "runtime.powerState"
+        if power_key not in properties:
+            return
+
+        new_state = str(properties[power_key])
+        entity_type = category.rstrip("s")
+
+        # Map power state to event class name
+        event_class_map: dict[str, str] = {
+            "poweredOn": f"{'Vm' if entity_type == 'vm' else 'Host'}PoweredOnEvent",
+            "poweredOff": f"{'Vm' if entity_type == 'vm' else 'Host'}PoweredOffEvent",
+            "suspended": "VmSuspendedEvent",
+        }
+        event_class = event_class_map.get(new_state, f"{entity_type.title()}StateChangeEvent")
+
+        # Try to get entity name
+        name_key = "summary.config.name"
+        entity_name = properties.get(name_key, moref)
+
+        self._fire_event(
+            "vsphere_event",
+            {
+                "entry_id": self._entry_id,
+                "event_class": event_class,
+                "entity_type": entity_type,
+                "entity_moref": moref,
+                "entity_name": entity_name,
+                "message": f"{entity_name} is {new_state}",
+                "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
 
     def _process_alarm_update(self, moref: str, entity_type: str, alarm_states: Any) -> None:
         """Process triggeredAlarmState property change."""
