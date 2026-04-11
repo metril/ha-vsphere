@@ -110,13 +110,18 @@ class VSphereEventListener:
         self._pc, self._pc_filter = self._client.create_property_filter(self._categories, self._entity_filter)
         self._do_initial_fetch()
         self._fetch_recent_events()
-        self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._run_loop,
-            name=f"vsphere_event_listener_{self._entry_id}",
-            daemon=True,
-        )
-        self._thread.start()
+
+        # Only start the push loop if we have a PropertyCollector filter
+        if self._pc is not None and self._pc_filter is not None:
+            self._stop_event.clear()
+            self._thread = threading.Thread(
+                target=self._run_loop,
+                name=f"vsphere_event_listener_{self._entry_id}",
+                daemon=True,
+            )
+            self._thread.start()
+        else:
+            _LOGGER.info("No PropertyCollector filter — running in poll-only mode")
 
     def stop(self) -> None:
         """Stop the listener."""
@@ -363,9 +368,13 @@ class VSphereEventListener:
             if host_obj:
                 # Only read _moId (local attribute). Don't access host_obj.name —
                 # it triggers a live RPC on the push connection from this thread.
-                # host_name is already populated from the initial fetch.
                 with contextlib.suppress(Exception):
-                    d["host_moref"] = str(host_obj._moId)
+                    host_moref = str(host_obj._moId)
+                    d["host_moref"] = host_moref
+                    # Look up host_name from coordinator's hosts data (in-memory, GIL-safe)
+                    host_data = self._vsphere_data._data.get("hosts", {}).get(host_moref)  # noqa: SLF001
+                    if host_data:
+                        d["host_name"] = host_data.get("name", host_moref)
         if "_snapshot_obj" in d:
             snap_obj = d.pop("_snapshot_obj")
             if snap_obj is not None and hasattr(snap_obj, "rootSnapshotList"):

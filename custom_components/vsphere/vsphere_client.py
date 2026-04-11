@@ -1337,7 +1337,8 @@ class VSphereClient:
             prop_specs.append(prop_spec)
 
         if not prop_specs:
-            raise VSphereConnectionError("No properties to watch — enable at least one monitoring category")
+            _LOGGER.info("No PropertyCollector-watchable categories enabled; push updates disabled")
+            return None, None
 
         filter_spec = vmodl.query.PropertyCollector.FilterSpec(
             objectSet=obj_specs,
@@ -1449,6 +1450,7 @@ class VSphereClient:
                 "suspended": "suspended",
             }
             data["state"] = state_map.get(raw_state, raw_state)
+            data["status"] = str(summary.overallStatus) if summary.overallStatus else "gray"
 
             # Storage
             storage = summary.storage
