@@ -95,10 +95,13 @@ class VSphereEventListener:
             initial_data["resource_pools"] = self._apply_filter(
                 self._client.get_resource_pools(), Category.RESOURCE_POOLS
             )
+        if self._categories.get(Category.EVENTS_ALARMS):
+            initial_data["alarms"] = self._client.get_alarms()
 
         self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
         _LOGGER.info(
-            "Initial fetch: %d hosts, %d VMs, %d datastores, %d licenses, %d clusters, %d networks, %d resource_pools",
+            "Initial fetch: %d hosts, %d VMs, %d datastores, %d licenses, "
+            "%d clusters, %d networks, %d resource_pools, %d alarm entities",
             len(initial_data.get("hosts", {})),
             len(initial_data.get("vms", {})),
             len(initial_data.get("datastores", {})),
@@ -106,6 +109,7 @@ class VSphereEventListener:
             len(initial_data.get("clusters", {})),
             len(initial_data.get("networks", {})),
             len(initial_data.get("resource_pools", {})),
+            len(initial_data.get("alarms", {})),
         )
 
     def _apply_filter(self, data: dict[str, Any], category: str) -> dict[str, Any]:
@@ -186,6 +190,13 @@ class VSphereEventListener:
         for change in obj_update.changeSet:
             properties[change.name] = change.val
 
+        # Check for alarm state changes
+        if self._categories.get(Category.EVENTS_ALARMS):
+            for change in obj_update.changeSet:
+                if change.name == "triggeredAlarmState":
+                    entity_type = category.rstrip("s")  # "hosts" → "host"
+                    self._process_alarm_update(moref, entity_type, change.val)
+
         if kind == "enter":
             filter_config: dict[str, Any] = self._entity_filter.get(category, {})
             if filter_config.get("mode", "all") == "select" and moref not in set(filter_config.get("morefs", [])):
@@ -220,6 +231,58 @@ class VSphereEventListener:
             vim.ResourcePool: "resource_pools",
         }
         return mapping.get(obj_type)
+
+    def _process_alarm_update(self, moref: str, entity_type: str, alarm_states: Any) -> None:
+        """Process triggeredAlarmState property change."""
+        alarms = []
+        if alarm_states:
+            for alarm_state in alarm_states:
+                try:
+                    alarm_info = {
+                        "alarm_key": str(alarm_state.key),
+                        "alarm_name": str(alarm_state.alarm.info.name)
+                        if hasattr(alarm_state.alarm, "info")
+                        else str(alarm_state.alarm),
+                        "status": str(alarm_state.overallStatus),
+                        "time": str(alarm_state.time) if alarm_state.time else None,
+                        "acknowledged": getattr(alarm_state, "acknowledged", False),
+                        "entity_moref": moref,
+                        "entity_type": entity_type,
+                    }
+                    alarms.append(alarm_info)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("Failed to parse alarm state for %s", moref, exc_info=True)
+
+        # Get previous alarm states for change detection
+        old_alarms = self._vsphere_data._data.get("alarms", {}).get(moref, [])  # noqa: SLF001
+        old_statuses = {a.get("alarm_key"): a.get("status") for a in old_alarms}
+
+        # Fire events for changed alarms
+        for alarm in alarms:
+            old_status = old_statuses.get(alarm["alarm_key"])
+            if old_status != alarm["status"]:
+                self._fire_event(
+                    "vsphere_alarm_triggered",
+                    {
+                        "entry_id": self._entry_id,
+                        "entity_type": entity_type,
+                        "entity_moref": moref,
+                        "alarm_key": alarm["alarm_key"],
+                        "alarm_name": alarm["alarm_name"],
+                        "old_status": old_status or "green",
+                        "new_status": alarm["status"],
+                        "time": alarm["time"],
+                        "acknowledged": alarm["acknowledged"],
+                    },
+                )
+
+        # Update coordinator alarms data
+        self._hass.loop.call_soon_threadsafe(self._update_alarms, moref, alarms)
+
+    def _update_alarms(self, moref: str, alarms: list[dict[str, Any]]) -> None:
+        """Update alarm data on the coordinator."""
+        self._vsphere_data._data.setdefault("alarms", {})[moref] = alarms  # noqa: SLF001
+        self._vsphere_data.async_set_updated_data(self._vsphere_data._data)  # noqa: SLF001
 
     def _fire_event(self, event_type: str, data: dict[str, Any]) -> None:
         """Fire a Home Assistant event on the event bus."""

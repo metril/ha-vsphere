@@ -19,7 +19,7 @@ from homeassistant.const import (
     UnitOfTime,
 )
 
-from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN
+from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, Category
 from .entity import VSphereEntity
 
 if TYPE_CHECKING:
@@ -545,6 +545,20 @@ DATASTORE_PERF_SENSORS: tuple[VSphereSensorDescription, ...] = (
 )
 
 # ---------------------------------------------------------------------------
+# Alarm sensors (per-entity, keyed by moref in coordinator data["alarms"])
+# ---------------------------------------------------------------------------
+
+ALARM_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="active_alarm_count",
+        name="Active Alarms",
+        icon="mdi:alarm-light",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: len(data) if isinstance(data, list) else 0,
+    ),
+)
+
+# ---------------------------------------------------------------------------
 # Sensor map: category → (descriptions, coordinator data key)
 # ---------------------------------------------------------------------------
 
@@ -568,7 +582,7 @@ async def async_setup_entry(
     coordinator: VSphereData = data["coordinator"]
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
 
-    entities: list[VSphereSensor | VSpherePerfSensor] = []
+    entities: list[VSphereSensor | VSpherePerfSensor | VSphereAlarmSensor] = []
 
     for category, (descriptions, data_key) in SENSOR_MAP.items():
         if not categories.get(category):
@@ -624,6 +638,35 @@ async def async_setup_entry(
             name = obj_data.get("name", moref)
             for desc in DATASTORE_PERF_SENSORS:
                 entities.append(VSpherePerfSensor(coordinator, entry, "datastores", moref, name, desc))
+
+    # Alarm count sensors — created for each host/VM when events_alarms is enabled
+    if categories.get(Category.EVENTS_ALARMS):
+        for moref, obj_data in coordinator.data.get("hosts", {}).items():
+            name = obj_data.get("name", moref)
+            for desc in ALARM_SENSORS:
+                entities.append(
+                    VSphereAlarmSensor(
+                        coordinator=coordinator,
+                        entry=entry,
+                        object_type="hosts",
+                        moref=moref,
+                        name=name,
+                        description=desc,
+                    )
+                )
+        for moref, obj_data in coordinator.data.get("vms", {}).items():
+            name = obj_data.get("name", moref)
+            for desc in ALARM_SENSORS:
+                entities.append(
+                    VSphereAlarmSensor(
+                        coordinator=coordinator,
+                        entry=entry,
+                        object_type="vms",
+                        moref=moref,
+                        name=name,
+                        description=desc,
+                    )
+                )
 
     async_add_entities(entities)
 
@@ -682,3 +725,31 @@ class VSpherePerfSensor(VSphereEntity, SensorEntity):
             return None
         perf_data = self.coordinator.data.get("perf", {}).get(self._moref, {})
         return self.entity_description.value_fn(perf_data)
+
+
+class VSphereAlarmSensor(VSphereEntity, SensorEntity):
+    """Sensor for alarm counts per host or VM."""
+
+    entity_description: VSphereSensorDescription
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        object_type: str,
+        moref: str,
+        name: str,
+        description: VSphereSensorDescription,
+    ) -> None:
+        """Initialize the alarm sensor."""
+        super().__init__(coordinator, entry, object_type, moref, name)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{moref}_{description.key}"
+
+    @property
+    def native_value(self) -> Any:
+        """Return the alarm count for this entity."""
+        if not self.coordinator.data:
+            return None
+        alarms = self.coordinator.data.get("alarms", {}).get(self._moref, [])
+        return self.entity_description.value_fn(alarms)

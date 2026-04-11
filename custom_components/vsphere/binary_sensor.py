@@ -12,7 +12,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.const import EntityCategory
 
-from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN
+from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, Category
 from .entity import VSphereEntity
 
 if TYPE_CHECKING:
@@ -122,6 +122,19 @@ PNIC_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
 )
 
 # ---------------------------------------------------------------------------
+# Alarm binary sensors (per-entity, keyed by moref in coordinator data["alarms"])
+# ---------------------------------------------------------------------------
+
+ALARM_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
+    VSphereBinarySensorDescription(
+        key="alarm_active",
+        name="Alarm",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda data: any(a.get("status") == "red" for a in data) if isinstance(data, list) else False,
+    ),
+)
+
+# ---------------------------------------------------------------------------
 # Binary sensor map: category → (descriptions, coordinator data key)
 # ---------------------------------------------------------------------------
 
@@ -142,7 +155,7 @@ async def async_setup_entry(
     coordinator: VSphereData = data["coordinator"]
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
 
-    entities: list[VSphereBinarySensor] = []
+    entities: list[VSphereBinarySensor | VSphereAlarmBinarySensor] = []
 
     for category, (descriptions, data_key) in BINARY_SENSOR_MAP.items():
         if not categories.get(category):
@@ -179,6 +192,35 @@ async def async_setup_entry(
                     )
                 )
 
+    # Alarm status binary sensors — created for each host/VM when events_alarms is enabled
+    if categories.get(Category.EVENTS_ALARMS):
+        for moref, obj_data in coordinator.data.get("hosts", {}).items():
+            name = obj_data.get("name", moref)
+            for desc in ALARM_BINARY_SENSORS:
+                entities.append(
+                    VSphereAlarmBinarySensor(
+                        coordinator=coordinator,
+                        entry=entry,
+                        object_type="hosts",
+                        moref=moref,
+                        name=name,
+                        description=desc,
+                    )
+                )
+        for moref, obj_data in coordinator.data.get("vms", {}).items():
+            name = obj_data.get("name", moref)
+            for desc in ALARM_BINARY_SENSORS:
+                entities.append(
+                    VSphereAlarmBinarySensor(
+                        coordinator=coordinator,
+                        entry=entry,
+                        object_type="vms",
+                        moref=moref,
+                        name=name,
+                        description=desc,
+                    )
+                )
+
     async_add_entities(entities)
 
 
@@ -208,3 +250,31 @@ class VSphereBinarySensor(VSphereEntity, BinarySensorEntity):
         if obj_data is None:
             return None
         return self.entity_description.value_fn(obj_data)
+
+
+class VSphereAlarmBinarySensor(VSphereEntity, BinarySensorEntity):
+    """Binary sensor for alarm active status per host or VM."""
+
+    entity_description: VSphereBinarySensorDescription
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        object_type: str,
+        moref: str,
+        name: str,
+        description: VSphereBinarySensorDescription,
+    ) -> None:
+        """Initialize the alarm binary sensor."""
+        super().__init__(coordinator, entry, object_type, moref, name)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{moref}_{description.key}"
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if any red alarm is active for this entity."""
+        if not self.coordinator.data:
+            return None
+        alarms = self.coordinator.data.get("alarms", {}).get(self._moref, [])
+        return self.entity_description.value_fn(alarms)

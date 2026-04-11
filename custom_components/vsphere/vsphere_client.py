@@ -407,6 +407,58 @@ class VSphereClient:
         finally:
             self._disconnect(conn)
 
+    def get_alarms(self) -> dict[str, list[dict[str, Any]]]:
+        """Fetch current triggered alarms for all hosts and VMs."""
+        self.ensure_poll_connection()
+        content = self._poll_conn.RetrieveContent()
+        alarms: dict[str, list[dict[str, Any]]] = {}
+
+        # Host alarms
+        container = content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)
+        try:
+            for host in container.view:
+                moref = str(host._moId)  # noqa: SLF001
+                triggered = host.triggeredAlarmState
+                if triggered:
+                    alarms[moref] = self._parse_alarm_states(triggered, moref, "host")
+        finally:
+            container.Destroy()
+
+        # VM alarms
+        container = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
+        try:
+            for vm_obj in container.view:
+                moref = str(vm_obj._moId)  # noqa: SLF001
+                triggered = vm_obj.triggeredAlarmState
+                if triggered:
+                    alarms[moref] = self._parse_alarm_states(triggered, moref, "vm")
+        finally:
+            container.Destroy()
+
+        return alarms
+
+    def _parse_alarm_states(self, alarm_states: Any, moref: str, entity_type: str) -> list[dict[str, Any]]:
+        """Parse AlarmState objects into flat dicts."""
+        result = []
+        for alarm_state in alarm_states:
+            try:
+                result.append(
+                    {
+                        "alarm_key": str(alarm_state.key),
+                        "alarm_name": str(alarm_state.alarm.info.name)
+                        if hasattr(alarm_state.alarm, "info")
+                        else str(alarm_state.alarm),
+                        "status": str(alarm_state.overallStatus),
+                        "time": str(alarm_state.time) if alarm_state.time else None,
+                        "acknowledged": getattr(alarm_state, "acknowledged", False),
+                        "entity_moref": moref,
+                        "entity_type": entity_type,
+                    }
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Failed to parse alarm state", exc_info=True)
+        return result
+
     def enumerate_inventory(self) -> dict[str, dict[str, Any]]:
         """Lightweight inventory enumeration for config flow (morefs + names only)."""
         conn = self._connect()
