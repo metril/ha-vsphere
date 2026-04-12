@@ -99,6 +99,7 @@ class VSphereEventListener:
         self._stop_event = threading.Event()
         self._pc: Any = None
         self._pc_filter: Any = None
+        self._containers: list[Any] = []
         self._event_baseline_time: float = 0.0
         # Local alarm state cache — written/read only on the background thread
         self._alarm_cache: dict[str, list[dict[str, Any]]] = {}
@@ -107,7 +108,9 @@ class VSphereEventListener:
         """Start listener (called from executor). Connects, fetches initial data, starts loop."""
         _LOGGER.info("Starting vSphere event listener")
         self._client.connect_push()
-        self._pc, self._pc_filter = self._client.create_property_filter(self._categories, self._entity_filter)
+        self._pc, self._pc_filter, self._containers = self._client.create_property_filter(
+            self._categories, self._entity_filter
+        )
         self._do_initial_fetch()
         self._fetch_recent_events()
 
@@ -132,6 +135,10 @@ class VSphereEventListener:
         if self._pc_filter:
             with contextlib.suppress(Exception):
                 self._pc_filter.Destroy()
+        for container in self._containers:
+            with contextlib.suppress(Exception):
+                container.Destroy()
+        self._containers = []
         self._client.disconnect_push()
 
     def _do_initial_fetch(self) -> None:
@@ -397,6 +404,9 @@ class VSphereEventListener:
         if "_host_list" in d:
             val = d.pop("_host_list")
             d["connected_hosts"] = len(val) if val else 0
+            if val:
+                with contextlib.suppress(Exception):
+                    d["host_morefs"] = [str(h.key._moId) for h in val]  # noqa: SLF001
         if "_vm_list" in d:
             val = d.pop("_vm_list")
             d["virtual_machines"] = len(val) if val else 0
@@ -552,5 +562,11 @@ class VSphereEventListener:
         if self._pc_filter:
             with contextlib.suppress(Exception):
                 self._pc_filter.Destroy()
-        self._pc, self._pc_filter = self._client.create_property_filter(self._categories, self._entity_filter)
+        for container in self._containers:
+            with contextlib.suppress(Exception):
+                container.Destroy()
+        self._containers = []
+        self._pc, self._pc_filter, self._containers = self._client.create_property_filter(
+            self._categories, self._entity_filter
+        )
         self._do_initial_fetch()

@@ -280,7 +280,7 @@ LICENSE_SENSORS: tuple[VSphereSensorDescription, ...] = (
         translation_key="license_status",
         name="Status",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: "active" if (d.get("free", 0) or 0) > 0 else "exhausted",
+        value_fn=lambda d: d.get("status", "unknown"),
     ),
     VSphereSensorDescription(
         key="expiration_days",

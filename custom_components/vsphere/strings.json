@@ -82,8 +82,8 @@
                 "description": "Configure monitoring categories and intervals."
             },
             "entity_selection": {
-                "title": "Entity Selection",
-                "description": "Select which {category} to monitor."
+                "title": "{category} Selection",
+                "description": "Choose which {category} to monitor. Toggle 'Monitor all' to automatically include newly added objects, or disable it to pick specific ones."
             },
             "restrictions": {
                 "title": "Operation Restrictions",

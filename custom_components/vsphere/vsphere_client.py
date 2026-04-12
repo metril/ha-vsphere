@@ -1358,7 +1358,8 @@ class VSphereClient:
             entity_filter: Entity filter configuration dict (reserved for future use).
 
         Returns:
-            Tuple of (property_collector, filter_obj).
+            Tuple of (property_collector, filter_obj, containers).
+            Caller must destroy the containers when done.
         """
         conn = self._push_conn
         if conn is None:
@@ -1366,6 +1367,7 @@ class VSphereClient:
 
         content = conn.RetrieveContent()
         pc = content.propertyCollector
+        containers: list[Any] = []
 
         obj_specs: list[Any] = []
         prop_specs: list[Any] = []
@@ -1392,6 +1394,7 @@ class VSphereClient:
                 [obj_type],
                 True,  # recursive=True
             )
+            containers.append(container)
 
             # Traversal spec: ContainerView → view (its contents)
             traversal = vmodl.query.PropertyCollector.TraversalSpec(
@@ -1419,7 +1422,10 @@ class VSphereClient:
 
         if not prop_specs:
             _LOGGER.info("No PropertyCollector-watchable categories enabled; push updates disabled")
-            return None, None
+            for c in containers:
+                with contextlib.suppress(Exception):
+                    c.Destroy()
+            return None, None, []
 
         filter_spec = vmodl.query.PropertyCollector.FilterSpec(
             objectSet=obj_specs,
@@ -1427,7 +1433,7 @@ class VSphereClient:
         )
 
         filter_obj = pc.CreateFilter(filter_spec, partialUpdates=True)
-        return pc, filter_obj
+        return pc, filter_obj, containers
 
     # ------------------------------------------------------------------
     # Parsing helpers
