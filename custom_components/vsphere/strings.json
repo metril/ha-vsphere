@@ -167,13 +167,15 @@
                     "host": "Host",
                     "port": "Port",
                     "username": "Username",
-                    "password": "Password"
+                    "password": "Password",
+                    "refresh_privileges": "Refresh vSphere privileges"
                 },
                 "data_description": {
                     "host": "IP address or hostname of your vCenter or ESXi server",
                     "port": "Usually 443 for HTTPS connections",
                     "username": "For vCenter use user@domain.com format. For ESXi use local account name (e.g., root)",
-                    "password": "Your vSphere account password"
+                    "password": "Your vSphere account password",
+                    "refresh_privileges": "Re-check which actions your vSphere account is allowed to perform on each host and VM"
                 },
                 "sections": {
                     "ssl_options": {

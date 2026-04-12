@@ -603,6 +603,8 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         existing_data = dict(reconfigure_entry.data)
 
         if user_input is not None:
+            refresh_privs = user_input.pop("refresh_privileges", False)
+
             # Flatten SSL section into a copy (preserve original for form re-render)
             flat_input = dict(user_input)
             _flatten_ssl_section(flat_input)
@@ -612,14 +614,40 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
                 new_unique_id = f"{flat_input[CONF_HOST]}:{flat_input[CONF_PORT]}"
                 await self.async_set_unique_id(new_unique_id)
                 self._abort_if_unique_id_configured(updates={**existing_data, **flat_input})
+
+                # Refresh privileges if requested
+                if refresh_privs:
+                    client = VSphereClient(
+                        host=flat_input[CONF_HOST],
+                        port=flat_input[CONF_PORT],
+                        username=flat_input[CONF_USERNAME],
+                        password=flat_input[CONF_PASSWORD],
+                        verify_ssl=flat_input[CONF_VERIFY_SSL],
+                        ssl_ca_path=flat_input.get(CONF_SSL_CA_PATH, ""),
+                    )
+                    try:
+                        new_privs = await self.hass.async_add_executor_job(client.check_privileges)
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.warning("Privilege refresh failed, keeping existing privileges")
+                        new_privs = reconfigure_entry.options.get(CONF_PRIVILEGES, {})
+
+                    new_options = dict(reconfigure_entry.options)
+                    new_options[CONF_PRIVILEGES] = new_privs
+                    self.hass.config_entries.async_update_entry(reconfigure_entry, options=new_options)
+
                 return self.async_update_reload_and_abort(
                     reconfigure_entry,
                     data={**existing_data, **flat_input},
                 )
 
+        # Build schema with refresh_privileges toggle added
+        conn_schema = _connection_schema(existing_data)
+        fields: dict[Any, Any] = dict(conn_schema.schema)
+        fields[vol.Required("refresh_privileges", default=False)] = BooleanSelector()
+
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=_connection_schema(existing_data),
+            data_schema=vol.Schema(fields),
             errors=errors,
         )
 
