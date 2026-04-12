@@ -30,11 +30,11 @@
                 }
             },
             "entity_selection": {
-                "title": "Entity Selection",
-                "description": "Select which objects to monitor for {category}.",
+                "title": "{category} Selection",
+                "description": "Choose which {category} to monitor. Toggle 'Monitor all' to automatically include newly added objects, or disable it to pick specific ones from the list below.",
                 "data": {
-                    "select_all": "Monitor all (including future additions)",
-                    "selected_objects": "Select specific objects"
+                    "select_all": "Monitor all {category} (including future additions)",
+                    "selected_objects": "Select specific {category}"
                 }
             },
             "intervals": {

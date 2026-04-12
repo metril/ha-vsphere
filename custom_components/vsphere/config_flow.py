@@ -63,6 +63,14 @@ _FILTERABLE_CATEGORIES: list[Category] = [
     Category.RESOURCE_POOLS,
 ]
 
+_CATEGORY_DISPLAY_NAMES: dict[Category, str] = {
+    Category.HOSTS: "Hosts",
+    Category.VMS: "Virtual Machines",
+    Category.DATASTORES: "Datastores",
+    Category.CLUSTERS: "Clusters",
+    Category.RESOURCE_POOLS: "Resource Pools",
+}
+
 
 def _connection_schema(
     defaults: dict[str, Any] | None = None,
@@ -252,7 +260,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="entity_selection",
             data_schema=data_schema,
-            description_placeholders={"category": category.value},
+            description_placeholders={"category": _CATEGORY_DISPLAY_NAMES.get(category, category.value)},
         )
 
     # ------------------------------------------------------------------
@@ -542,7 +550,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         return self.async_show_form(
             step_id="entity_selection",
             data_schema=data_schema,
-            description_placeholders={"category": category.value},
+            description_placeholders={"category": _CATEGORY_DISPLAY_NAMES.get(category, category.value)},
         )
 
     # ------------------------------------------------------------------
