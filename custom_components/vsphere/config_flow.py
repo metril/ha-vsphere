@@ -339,7 +339,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
                     SelectSelectorConfig(
                         options=options,
                         multiple=True,
-                        mode=SelectSelectorMode.DROPDOWN,
+                        mode=SelectSelectorMode.LIST,
                     )
                 ),
             }
@@ -438,19 +438,19 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         if vm_options:
             current_restricted_vms = list(self._restrictions.get("vms", {}).keys())
             schema_fields[vol.Optional("restricted_vms", default=current_restricted_vms)] = SelectSelector(
-                SelectSelectorConfig(options=vm_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                SelectSelectorConfig(options=vm_options, multiple=True, mode=SelectSelectorMode.LIST)
             )
             schema_fields[vol.Optional("vm_blocked_actions", default=[])] = SelectSelector(
-                SelectSelectorConfig(options=vm_action_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                SelectSelectorConfig(options=vm_action_options, multiple=True, mode=SelectSelectorMode.LIST)
             )
 
         if host_options:
             current_restricted_hosts = list(self._restrictions.get("hosts", {}).keys())
             schema_fields[vol.Optional("restricted_hosts", default=current_restricted_hosts)] = SelectSelector(
-                SelectSelectorConfig(options=host_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                SelectSelectorConfig(options=host_options, multiple=True, mode=SelectSelectorMode.LIST)
             )
             schema_fields[vol.Optional("host_blocked_actions", default=[])] = SelectSelector(
-                SelectSelectorConfig(options=host_action_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                SelectSelectorConfig(options=host_action_options, multiple=True, mode=SelectSelectorMode.LIST)
             )
 
         return self.async_show_form(
@@ -703,7 +703,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
                     SelectSelectorConfig(
                         options=options,
                         multiple=True,
-                        mode=SelectSelectorMode.DROPDOWN,
+                        mode=SelectSelectorMode.LIST,
                     )
                 ),
             }
@@ -809,18 +809,18 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
 
         if vm_options:
             schema_fields[vol.Optional("restricted_vms", default=current_restricted_vms)] = SelectSelector(
-                SelectSelectorConfig(options=vm_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                SelectSelectorConfig(options=vm_options, multiple=True, mode=SelectSelectorMode.LIST)
             )
             schema_fields[vol.Optional("vm_blocked_actions", default=current_vm_actions)] = SelectSelector(
-                SelectSelectorConfig(options=vm_action_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                SelectSelectorConfig(options=vm_action_options, multiple=True, mode=SelectSelectorMode.LIST)
             )
 
         if host_options:
             schema_fields[vol.Optional("restricted_hosts", default=current_restricted_hosts)] = SelectSelector(
-                SelectSelectorConfig(options=host_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                SelectSelectorConfig(options=host_options, multiple=True, mode=SelectSelectorMode.LIST)
             )
             schema_fields[vol.Optional("host_blocked_actions", default=current_host_actions)] = SelectSelector(
-                SelectSelectorConfig(options=host_action_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                SelectSelectorConfig(options=host_action_options, multiple=True, mode=SelectSelectorMode.LIST)
             )
 
         if not schema_fields:
