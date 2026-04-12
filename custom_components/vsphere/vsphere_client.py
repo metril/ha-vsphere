@@ -210,8 +210,15 @@ class VSphereClient:
                 privId=privs_to_check,
             )
 
-            # result is a list of vim.BoolPolicy or plain bools
+            # result is a list of bools matching privs_to_check order
             privileges: dict[str, bool] = {}
+            if len(result) != len(privs_to_check):
+                _LOGGER.warning(
+                    "Privilege check returned %d results for %d queries; "
+                    "unmatched privileges will be assumed granted",
+                    len(result),
+                    len(privs_to_check),
+                )
             for priv_id, has_priv in zip(privs_to_check, result, strict=False):
                 privileges[priv_id] = bool(has_priv)
 

@@ -385,7 +385,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_ENTITY_FILTER: self._entity_filter,
             CONF_RESTRICTIONS: {},
             CONF_PERF_INTERVAL: perf_interval,
-            CONF_PRIVILEGES: getattr(self, "_privileges", {}),
+            CONF_PRIVILEGES: self._privileges,
         }
 
         return self.async_create_entry(

@@ -14,7 +14,6 @@ from .const import (
     CONF_HOST,
     CONF_PASSWORD,
     CONF_PORT,
-    CONF_PRIVILEGES,
     CONF_RESTRICTIONS,
     CONF_USERNAME,
     CONF_VERIFY_SSL,
@@ -73,10 +72,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(str(err)) from err
 
     # ------------------------------------------------------------------
+    # Check vSphere privileges (refresh on every load, not stale from setup)
+    # ------------------------------------------------------------------
+    try:
+        privileges: dict[str, bool] = await hass.async_add_executor_job(client.check_privileges)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("Privilege check failed, assuming full access")
+        privileges = {}
+
+    # ------------------------------------------------------------------
     # Create permission resolver
     # ------------------------------------------------------------------
     restrictions: dict[str, Any] = entry.options.get(CONF_RESTRICTIONS, {})
-    privileges: dict[str, bool] = entry.options.get(CONF_PRIVILEGES, {})
     resolver = PermissionResolver(restrictions, privileges)
 
     # ------------------------------------------------------------------
