@@ -66,7 +66,6 @@ async def async_setup_entry(
         for moref, vm_data in coordinator.data.get("vms", {}).items():
             name = vm_data.get("name", moref)
             for button_cls in (
-                VmShutdownButton,
                 VmRebootButton,
                 VmResetButton,
                 VmSuspendButton,
@@ -109,6 +108,7 @@ class _VSphereButton(VSphereEntity, ButtonEntity):
         super().__init__(coordinator, entry, object_type, moref, name)
         self._client = client
         self._resolver = resolver
+        self._entry_id = entry.entry_id
         self._attr_unique_id = f"{entry.entry_id}_{moref}_{self._unique_id_suffix}"
         self._attr_name = self._button_name
 
@@ -137,13 +137,17 @@ class HostShutdownButton(_VSphereButton):
         super().__init__(coordinator, entry, "hosts", moref, name, client, resolver)
 
     async def async_press(self) -> None:
-        """Shut down the host."""
+        """Shut down the host (graceful or forced depending on arm state)."""
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.SHUTDOWN):
             raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.SHUTDOWN))
+        armed_dict: dict[str, bool] = self.hass.data[DOMAIN][self._entry_id]["armed"]
+        armed = armed_dict.get(self._moref, False)
         try:
-            await self.hass.async_add_executor_job(self._client.host_power, self._moref, "shutdown")
+            await self.hass.async_add_executor_job(self._client.host_power, self._moref, "shutdown", armed)
         except VSphereOperationError as err:
             raise HomeAssistantError(f"Failed to shut down host {self._moref}: {err}") from err
+        if armed:
+            armed_dict.pop(self._moref, None)
 
 
 class HostRebootButton(_VSphereButton):
@@ -167,42 +171,17 @@ class HostRebootButton(_VSphereButton):
         super().__init__(coordinator, entry, "hosts", moref, name, client, resolver)
 
     async def async_press(self) -> None:
-        """Reboot the host."""
+        """Reboot the host (graceful or forced depending on arm state)."""
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.REBOOT):
             raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.REBOOT))
+        armed_dict: dict[str, bool] = self.hass.data[DOMAIN][self._entry_id]["armed"]
+        armed = armed_dict.get(self._moref, False)
         try:
-            await self.hass.async_add_executor_job(self._client.host_power, self._moref, "reboot")
+            await self.hass.async_add_executor_job(self._client.host_power, self._moref, "reboot", armed)
         except VSphereOperationError as err:
             raise HomeAssistantError(f"Failed to reboot host {self._moref}: {err}") from err
-
-
-class VmShutdownButton(_VSphereButton):
-    """Button to gracefully shut down a VM via VMware Tools."""
-
-    _button_name = "Shutdown"
-    _unique_id_suffix = "vm_shutdown"
-    _attr_icon = "mdi:power"
-
-    def __init__(
-        self,
-        coordinator: VSphereData,
-        entry: ConfigEntry,
-        moref: str,
-        name: str,
-        client: VSphereClient,
-        resolver: PermissionResolver,
-    ) -> None:
-        """Initialize."""
-        super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
-
-    async def async_press(self) -> None:
-        """Gracefully shut down the VM."""
-        if not self._resolver.is_allowed("vms", self._moref, VmAction.SHUTDOWN):
-            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SHUTDOWN))
-        try:
-            await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "shutdown")
-        except VSphereOperationError as err:
-            raise HomeAssistantError(f"Failed to shut down VM {self._moref}: {err}") from err
+        if armed:
+            armed_dict.pop(self._moref, None)
 
 
 class VmRebootButton(_VSphereButton):

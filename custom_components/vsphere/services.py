@@ -32,6 +32,9 @@ SVC_REMOVE_SNAPSHOT = "remove_snapshot"
 SVC_LIST_HOSTS = "list_hosts"
 SVC_LIST_POWER_POLICIES = "list_power_policies"
 SVC_VM_MIGRATE = "vm_migrate"
+SVC_VM_FORCE_POWER_OFF = "vm_force_power_off"
+SVC_HOST_FORCE_SHUTDOWN = "host_force_shutdown"
+SVC_HOST_FORCE_REBOOT = "host_force_reboot"
 
 # Field names
 ATTR_DEVICE_ID = "device_id"
@@ -44,6 +47,7 @@ ATTR_DESCRIPTION = "description"
 ATTR_MEMORY = "memory"
 ATTR_QUIESCE = "quiesce"
 ATTR_WHICH = "which"
+ATTR_CONFIRM = "confirm"
 
 # Schemas
 _VM_POWER_ACTIONS = [
@@ -112,6 +116,13 @@ _SCHEMA_VM_MIGRATE = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): str,
         vol.Required("target_host"): str,
+    }
+)
+
+_SCHEMA_FORCE_CONFIRM = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_CONFIRM): bool,
     }
 )
 
@@ -329,6 +340,53 @@ async def _handle_vm_migrate(call: ServiceCall) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Force power handlers (arm-bypass with confirm=True)
+# ---------------------------------------------------------------------------
+
+
+async def _handle_vm_force_power_off(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Force hard power off a VM, bypassing arm check when confirm=True."""
+    client, _, entry_id, vm_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
+    if not call.data[ATTR_CONFIRM]:
+        armed = hass.data[DOMAIN][entry_id]["armed"].get(vm_moref, False)
+        if not armed:
+            raise HomeAssistantError("Force power off is not armed. Set confirm=true or arm the switch first.")
+    try:
+        await hass.async_add_executor_job(client.vm_power, vm_moref, "power_off")
+    except VSphereOperationError as err:
+        raise HomeAssistantError(str(err)) from err
+    hass.data[DOMAIN][entry_id]["armed"].pop(vm_moref, None)
+
+
+async def _handle_host_force_shutdown(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Force shutdown a host, bypassing arm check when confirm=True."""
+    client, _, entry_id, host_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
+    if not call.data[ATTR_CONFIRM]:
+        armed = hass.data[DOMAIN][entry_id]["armed"].get(host_moref, False)
+        if not armed:
+            raise HomeAssistantError("Force shutdown is not armed. Set confirm=true or arm the switch first.")
+    try:
+        await hass.async_add_executor_job(client.host_power, host_moref, "shutdown", True)
+    except VSphereOperationError as err:
+        raise HomeAssistantError(str(err)) from err
+    hass.data[DOMAIN][entry_id]["armed"].pop(host_moref, None)
+
+
+async def _handle_host_force_reboot(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Force reboot a host, bypassing arm check when confirm=True."""
+    client, _, entry_id, host_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
+    if not call.data[ATTR_CONFIRM]:
+        armed = hass.data[DOMAIN][entry_id]["armed"].get(host_moref, False)
+        if not armed:
+            raise HomeAssistantError("Force reboot is not armed. Set confirm=true or arm the switch first.")
+    try:
+        await hass.async_add_executor_job(client.host_power, host_moref, "reboot", True)
+    except VSphereOperationError as err:
+        raise HomeAssistantError(str(err)) from err
+    hass.data[DOMAIN][entry_id]["armed"].pop(host_moref, None)
+
+
+# ---------------------------------------------------------------------------
 # Registration / unregistration
 # ---------------------------------------------------------------------------
 
@@ -410,6 +468,30 @@ async def async_register_services(hass: HomeAssistant) -> None:
             schema=_SCHEMA_VM_MIGRATE,
         )
 
+    if not hass.services.has_service(DOMAIN, SVC_VM_FORCE_POWER_OFF):
+        hass.services.async_register(
+            DOMAIN,
+            SVC_VM_FORCE_POWER_OFF,
+            lambda call: _handle_vm_force_power_off(hass, call),
+            schema=_SCHEMA_FORCE_CONFIRM,
+        )
+
+    if not hass.services.has_service(DOMAIN, SVC_HOST_FORCE_SHUTDOWN):
+        hass.services.async_register(
+            DOMAIN,
+            SVC_HOST_FORCE_SHUTDOWN,
+            lambda call: _handle_host_force_shutdown(hass, call),
+            schema=_SCHEMA_FORCE_CONFIRM,
+        )
+
+    if not hass.services.has_service(DOMAIN, SVC_HOST_FORCE_REBOOT):
+        hass.services.async_register(
+            DOMAIN,
+            SVC_HOST_FORCE_REBOOT,
+            lambda call: _handle_host_force_reboot(hass, call),
+            schema=_SCHEMA_FORCE_CONFIRM,
+        )
+
     _LOGGER.debug("vSphere services registered")
 
 
@@ -425,6 +507,9 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SVC_LIST_HOSTS,
         SVC_LIST_POWER_POLICIES,
         SVC_VM_MIGRATE,
+        SVC_VM_FORCE_POWER_OFF,
+        SVC_HOST_FORCE_SHUTDOWN,
+        SVC_HOST_FORCE_REBOOT,
     ):
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)

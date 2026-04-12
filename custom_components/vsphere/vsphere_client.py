@@ -22,7 +22,6 @@ from .const import (
     SNAP_ALL,
     SNAP_FIRST,
     SNAP_LAST,
-    VM_POWER_ON,
 )
 from .exceptions import VSphereAuthError, VSphereConnectionError, VSphereOperationError
 
@@ -880,17 +879,14 @@ class VSphereClient:
             if action == "power_on":
                 task = vm.PowerOnVM_Task()
 
-            elif action in ("power_off", "shutdown"):
+            elif action == "shutdown":
                 tools = getattr(getattr(vm.summary, "guest", None), "toolsStatus", None)
-                if tools in ("toolsOk", "toolsOld"):
-                    try:
-                        vm.ShutdownGuest()
-                        return  # fire-and-forget
-                    except vim.fault.ToolsUnavailable:
-                        _LOGGER.debug(
-                            "Tools unavailable for ShutdownGuest on %s; falling back to PowerOffVM",
-                            vm_moref,
-                        )
+                if tools not in ("toolsOk", "toolsOld"):
+                    raise VSphereOperationError(f"Cannot gracefully shut down VM {vm_moref}: VMware Tools not running")
+                vm.ShutdownGuest()
+                return  # fire-and-forget
+
+            elif action == "power_off":
                 task = vm.PowerOffVM_Task()
 
             elif action in ("reboot",):
@@ -1068,22 +1064,13 @@ class VSphereClient:
     def host_power(self, host_moref: str, action: str, force: bool = False) -> None:
         """Shutdown or reboot a host.
 
-        Safety check: refuses if VMs are running and force=False.
+        When force=False, vCenter gracefully shuts down VMs in the configured
+        auto startup/shutdown order before powering off/rebooting the host.
+        When force=True, running VMs are hard-killed immediately.
         """
         try:
             host = self._get_host_by_moref(host_moref)
             host_name = host.summary.config.name if host.summary.config else host_moref
-
-            if not force:
-                powered_vms = sum(
-                    1
-                    for vm in (host.vm or [])
-                    if getattr(getattr(vm, "runtime", None), "powerState", None) == VM_POWER_ON
-                )
-                if powered_vms > 0:
-                    raise VSphereOperationError(
-                        f"Cannot {action} {host_name}: {powered_vms} VMs running. Use force=true to override"
-                    )
 
             if action == "shutdown":
                 task = host.ShutdownHost_Task(force=force)

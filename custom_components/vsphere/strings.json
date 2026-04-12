@@ -58,7 +58,8 @@
                             "storage_advanced": "Advanced Storage",
                             "performance": "Performance Metrics",
                             "events_alarms": "Events & Alarms",
-                            "perf_interval": "Performance polling interval"
+                            "perf_interval": "Performance polling interval",
+                            "force_arm_timeout": "Force power arm timeout"
                         },
                         "data_description": {
                             "clusters": "Monitor DRS and HA cluster status",
@@ -67,7 +68,8 @@
                             "storage_advanced": "Per-VM disk and storage policy details",
                             "performance": "Real-time CPU/memory/disk/network metrics (polled)",
                             "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour"
+                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour",
+                            "force_arm_timeout": "How long the force power arm switch stays armed before auto-disarming (seconds)"
                         }
                     }
                 }
@@ -261,7 +263,8 @@
                             "storage_advanced": "Advanced Storage",
                             "performance": "Performance Metrics",
                             "events_alarms": "Events & Alarms",
-                            "perf_interval": "Performance polling interval"
+                            "perf_interval": "Performance polling interval",
+                            "force_arm_timeout": "Force power arm timeout"
                         },
                         "data_description": {
                             "clusters": "Monitor DRS and HA cluster status",
@@ -270,7 +273,8 @@
                             "storage_advanced": "Per-VM disk and storage policy details",
                             "performance": "Real-time CPU/memory/disk/network metrics (polled)",
                             "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour"
+                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour",
+                            "force_arm_timeout": "How long the force power arm switch stays armed before auto-disarming (seconds)"
                         }
                     }
                 }

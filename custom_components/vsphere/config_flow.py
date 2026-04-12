@@ -17,6 +17,9 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
     BooleanSelector,
     DurationSelector,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -29,6 +32,7 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_CATEGORIES,
     CONF_ENTITY_FILTER,
+    CONF_FORCE_ARM_TIMEOUT,
     CONF_HOST,
     CONF_PASSWORD,
     CONF_PERF_INTERVAL,
@@ -38,6 +42,7 @@ from .const import (
     CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_CATEGORIES,
+    DEFAULT_FORCE_ARM_TIMEOUT,
     DEFAULT_PERF_INTERVAL,
     DEFAULT_PORT,
     DEFAULT_VERIFY_SSL,
@@ -130,6 +135,7 @@ def _connection_schema(
 def _categories_schema(
     defaults: dict[str, bool] | None = None,
     perf_interval: int = DEFAULT_PERF_INTERVAL,
+    force_arm_timeout: int = DEFAULT_FORCE_ARM_TIMEOUT,
 ) -> vol.Schema:
     """Return the categories step schema with core and advanced sections."""
     effective = dict(DEFAULT_CATEGORIES)
@@ -148,6 +154,9 @@ def _categories_schema(
         for cat in _ADVANCED_CATEGORIES
     }
     advanced_fields[vol.Required(CONF_PERF_INTERVAL, default=_seconds_to_duration(perf_interval))] = DurationSelector()
+    advanced_fields[vol.Required(CONF_FORCE_ARM_TIMEOUT, default=force_arm_timeout)] = NumberSelector(
+        NumberSelectorConfig(min=10, max=300, step=5, mode=NumberSelectorMode.BOX, unit_of_measurement="seconds")
+    )
     advanced_schema = vol.Schema(advanced_fields)
 
     return vol.Schema(
@@ -192,8 +201,8 @@ def _flatten_ssl_section(user_input: dict[str, Any]) -> dict[str, Any]:
     return user_input
 
 
-def _flatten_category_sections(user_input: dict[str, Any]) -> tuple[dict[str, bool], int]:
-    """Flatten core/advanced sections and return categories dict and perf_interval."""
+def _flatten_category_sections(user_input: dict[str, Any]) -> tuple[dict[str, bool], int, int]:
+    """Flatten core/advanced sections and return (categories, perf_interval, force_arm_timeout)."""
     core = user_input.pop("core_categories", {})
     advanced = user_input.pop("advanced_categories", {})
     merged = {**core, **advanced}
@@ -209,7 +218,8 @@ def _flatten_category_sections(user_input: dict[str, Any]) -> tuple[dict[str, bo
     else:
         perf_interval = int(raw_interval)
     perf_interval = max(MIN_PERF_INTERVAL, min(MAX_PERF_INTERVAL, perf_interval))
-    return categories, perf_interval
+    force_arm_timeout = int(merged.get(CONF_FORCE_ARM_TIMEOUT, DEFAULT_FORCE_ARM_TIMEOUT))
+    return categories, perf_interval, force_arm_timeout
 
 
 class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -227,6 +237,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         self._current_filter_category: Category | None = None
         self._restrictions: dict[str, Any] = {}
         self._perf_interval: int = DEFAULT_PERF_INTERVAL
+        self._force_arm_timeout: int = DEFAULT_FORCE_ARM_TIMEOUT
         self._current_vm_moref: str | None = None
         self._current_host_moref: str | None = None
 
@@ -275,7 +286,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle monitoring category selection."""
         if user_input is not None:
-            self._categories, self._perf_interval = _flatten_category_sections(user_input)
+            self._categories, self._perf_interval, self._force_arm_timeout = _flatten_category_sections(user_input)
             return await self._start_entity_selection()
 
         return self.async_show_form(
@@ -692,6 +703,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_ENTITY_FILTER: self._entity_filter,
             CONF_RESTRICTIONS: self._restrictions,
             CONF_PERF_INTERVAL: self._perf_interval,
+            CONF_FORCE_ARM_TIMEOUT: self._force_arm_timeout,
         }
 
         return self.async_create_entry(
@@ -710,6 +722,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         current = dict(config_entry.options)
         self._new_categories: dict[str, bool] = dict(current.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
         self._new_perf_interval: int = current.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)
+        self._new_force_arm_timeout: int = current.get(CONF_FORCE_ARM_TIMEOUT, DEFAULT_FORCE_ARM_TIMEOUT)
         self._entity_filter: dict[str, Any] = dict(current.get(CONF_ENTITY_FILTER, {}))
         self._restrictions: dict[str, Any] = copy.deepcopy(current.get(CONF_RESTRICTIONS, {}))
         self._inventory: dict[str, dict[str, Any]] = {}
@@ -778,12 +791,14 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
     async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle monitoring category selection."""
         if user_input is not None:
-            self._new_categories, self._new_perf_interval = _flatten_category_sections(user_input)
+            self._new_categories, self._new_perf_interval, self._new_force_arm_timeout = _flatten_category_sections(
+                user_input
+            )
             return await self.async_step_init()
 
         return self.async_show_form(
             step_id="categories",
-            data_schema=_categories_schema(self._new_categories, self._new_perf_interval),
+            data_schema=_categories_schema(self._new_categories, self._new_perf_interval, self._new_force_arm_timeout),
         )
 
     # ------------------------------------------------------------------
@@ -1020,6 +1035,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
                 **dict(self.config_entry.options),
                 CONF_CATEGORIES: self._new_categories,
                 CONF_PERF_INTERVAL: self._new_perf_interval,
+                CONF_FORCE_ARM_TIMEOUT: self._new_force_arm_timeout,
                 CONF_ENTITY_FILTER: self._entity_filter,
                 CONF_RESTRICTIONS: self._restrictions,
             }

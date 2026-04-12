@@ -141,6 +141,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "event_listener": event_listener,
         "perf_coordinator": perf_coordinator,
         "resolver": resolver,
+        "armed": {},
     }
 
     # ------------------------------------------------------------------

@@ -153,3 +153,57 @@ vm_migrate:
       selector:
         device:
           integration: vsphere
+
+vm_force_power_off:
+  name: Force Power Off VM
+  description: Hard power off a virtual machine immediately. Bypasses arm requirement when confirm is true.
+  fields:
+    device_id:
+      name: VM
+      description: The virtual machine to force power off.
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    confirm:
+      name: Confirm
+      description: Set to true to bypass the arm switch requirement.
+      required: true
+      selector:
+        boolean:
+
+host_force_shutdown:
+  name: Force Shutdown Host
+  description: Force shutdown an ESXi host. Running VMs will be hard-killed. Bypasses arm requirement when confirm is true.
+  fields:
+    device_id:
+      name: Host
+      description: The ESXi host to force shutdown.
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    confirm:
+      name: Confirm
+      description: Set to true to bypass the arm switch requirement.
+      required: true
+      selector:
+        boolean:
+
+host_force_reboot:
+  name: Force Reboot Host
+  description: Force reboot an ESXi host. Running VMs will be hard-killed. Bypasses arm requirement when confirm is true.
+  fields:
+    device_id:
+      name: Host
+      description: The ESXi host to force reboot.
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    confirm:
+      name: Confirm
+      description: Set to true to bypass the arm switch requirement.
+      required: true
+      selector:
+        boolean:
