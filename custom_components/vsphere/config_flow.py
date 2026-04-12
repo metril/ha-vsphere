@@ -247,9 +247,17 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._connection_data = flat_input
                 return await self.async_step_categories()
 
+        # Flatten SSL section for re-render defaults so SSL field values are preserved
+        render_defaults = None
+        if user_input is not None:
+            render_defaults = dict(user_input)
+            ssl_opts = render_defaults.pop("ssl_options", {})
+            if isinstance(ssl_opts, dict):
+                render_defaults.update(ssl_opts)
+
         return self.async_show_form(
             step_id="user",
-            data_schema=_connection_schema(user_input),
+            data_schema=_connection_schema(render_defaults),
             errors=errors,
         )
 
@@ -771,17 +779,16 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
                 }
             )
 
-        # Build VM and host options from inventory or coordinator data
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
-        coordinator = entry_data.get("coordinator")
-
+        # Build VM and host options from freshly-fetched inventory (consistent with entity selection)
         vm_options: list[SelectOptionDict] = []
         host_options: list[SelectOptionDict] = []
-        if coordinator and coordinator.data:
-            for moref, data in coordinator.data.get("vms", {}).items():
-                vm_options.append(SelectOptionDict(value=moref, label=data.get("name", moref)))
-            for moref, data in coordinator.data.get("hosts", {}).items():
-                host_options.append(SelectOptionDict(value=moref, label=data.get("name", moref)))
+        for moref, info in self._inventory.items():
+            obj_type = info.get("type", "")
+            name = info.get("name", moref)
+            if obj_type == "vm":
+                vm_options.append(SelectOptionDict(value=moref, label=name))
+            elif obj_type == "host":
+                host_options.append(SelectOptionDict(value=moref, label=name))
 
         # Current per-object restrictions for defaults
         current_restricted_vms = list(self._restrictions.get("vms", {}).keys())
