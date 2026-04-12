@@ -288,7 +288,8 @@ LICENSE_SENSORS: tuple[VSphereSensorDescription, ...] = (
         name="Expiration Days",
         native_unit_of_measurement=UnitOfTime.DAYS,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda d: d.get("expiration_days"),
+        # Return None for perpetual licenses ("never") — HA requires numeric values for measurement sensors
+        value_fn=lambda d: d.get("expiration_days") if isinstance(d.get("expiration_days"), int) else None,
     ),
     VSphereSensorDescription(
         key="product",

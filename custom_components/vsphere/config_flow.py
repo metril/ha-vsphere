@@ -183,11 +183,12 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             username=self._connection_data[CONF_USERNAME],
             password=self._connection_data[CONF_PASSWORD],
             verify_ssl=self._connection_data[CONF_VERIFY_SSL],
+            ssl_ca_path=self._connection_data.get(CONF_SSL_CA_PATH, ""),
         )
         try:
             self._inventory = await self.hass.async_add_executor_job(client.enumerate_inventory)
         except Exception:  # noqa: BLE001
-            _LOGGER.debug("Could not enumerate inventory; skipping entity selection")
+            _LOGGER.warning("Could not enumerate inventory; skipping entity selection")
             self._inventory = {}
 
         # Build list of filterable categories that are enabled
