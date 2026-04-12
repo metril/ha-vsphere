@@ -12,6 +12,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlowWithConfigEntry,
 )
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -24,7 +25,6 @@ from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
-    section,
 )
 
 from .const import (
