@@ -12,24 +12,32 @@ Monitor and control VMware vSphere (ESXi and vCenter) infrastructure directly fr
 
 ## Features
 
-### Monitoring
-- **Hosts** — power state, maintenance mode, CPU/memory usage, uptime, VM count, power policy
-- **Virtual Machines** — power state, CPU/memory usage, uptime, snapshot count, guest IP, tools status
-- **Datastores** — capacity, free space, used space, accessibility
-- **Licenses** — product name, total/used/free seats
-- **Clusters** — basic cluster information (optional)
-- **Networks** — network inventory (optional)
-- **Resource Pools** — resource pool hierarchy (optional)
-- **Performance** — polled CPU/memory/network metrics at configurable intervals (optional)
-- **Events & Alarms** — real-time alarm and event forwarding to HA event bus (optional)
+### Monitoring (10 categories, independently toggleable)
+- **Hosts** — power state, maintenance mode, CPU/memory usage, uptime, VM count, version, build, power policy
+- **Virtual Machines** — power state, CPU/memory usage, uptime, snapshot count, guest IP/OS, tools status
+- **Datastores** — capacity, free space, connected hosts, virtual machines, type
+- **Licenses** — status, expiration days, product name
+- **Clusters** — DRS/HA status, host/VM counts, CPU/memory totals (optional)
+- **Networks** — vSwitch ports/MTU, physical NIC speed/link status, port group VLANs (optional, on host device)
+- **Resource Pools** — CPU/memory reservations and limits, VM count (optional)
+- **Storage Advanced** — per-VM disk capacity, thin provisioning, storage summaries (optional, on VM device)
+- **Performance** — real-time CPU/memory/disk/network metrics via PerformanceManager (optional, polled)
+- **Events & Alarms** — alarm state tracking with HA event firing (optional, pushed)
 
-### Control Entities
-- **Switches** — VM power, host maintenance mode
-- **Buttons** — VM shutdown, reboot, reset, suspend; host shutdown/reboot
-- **Selects** — VM snapshot management, host power policy
+### Control (84 entity types across 5 platforms)
+- **Sensors** — 63 sensor types across hosts, VMs, datastores, licenses, clusters, network, resource pools, storage, performance, alarms
+- **Binary Sensors** — 11 types (power, maintenance, tools, DRS/HA, NIC link, alarms)
+- **Switches** — VM power on/off (graceful shutdown via VMware Tools), host maintenance mode toggle
+- **Buttons** — host reboot, VM reboot/reset, snapshot create/remove (all/first/last) — 7 types
+- **Selects** — host power policy
+
+### Security
+- **vSphere privilege checking** — account privileges verified on every HA load; control entities automatically blocked if the account lacks required privileges
+- **Granular permission system** — 9-step resolution chain with per-object, per-category, and global restrictions
+- **Custom CA certificate** — optional CA file path for environments with internal PKI
 
 ### Services
-Nine action services with device targeting and permission enforcement (see [Services Reference](#services-reference)).
+Nine services with device targeting and permission enforcement (see [Services Reference](#services-reference)).
 
 ### HA Events
 Three event types fired on the HA event bus (see [Events](#ha-events)).
@@ -63,18 +71,28 @@ Three event types fired on the HA event bus (see [Events](#ha-events)).
 |-------|-------------|---------|
 | Host | ESXi hostname or vCenter IP/FQDN | — |
 | Port | HTTPS API port | `443` |
-| Username | vSphere user (e.g. `administrator@vsphere.local`) | — |
+| Username | For vCenter: `user@domain.com`. For ESXi: local account name | — |
 | Password | vSphere password | — |
 | Verify SSL | Validate the server certificate | `false` |
+| CA Certificate Path | Path to custom CA PEM file (e.g., `/ssl/vsphere-ca.pem`) | — |
 
-4. After the integration connects, configure options via **Configure**:
+**SSL modes:**
+- **Verify SSL off** — no certificate verification (insecure, for testing)
+- **Verify SSL on, no CA path** — verifies against system trust store
+- **Verify SSL on, CA path set** — verifies against your custom CA certificate
+
+4. Select which **monitoring categories** to enable (hosts, VMs, datastores, licenses on by default).
+5. For each enabled category, choose **"Monitor all"** (dynamic — picks up new objects) or select specific objects from the live inventory.
+6. If Performance Metrics is enabled, set the **polling interval** (60–3600 seconds, default 300).
+
+After setup, configure additional options via **Configure**:
 
 | Option | Description |
 |--------|-------------|
-| Categories | Select which object types to monitor |
-| Entity filter | Limit entities to specific MoRefs or name patterns |
-| Restrictions | Permission rules to block specific actions |
-| Performance interval | Polling interval for perf metrics (60–3600 s) |
+| Categories | Enable/disable monitoring categories |
+| Entity Selection | Choose which objects to monitor per category (with live inventory re-fetch) |
+| Restrictions | Global operation restrictions (block destructive, snapshots, migration, host ops) |
+| Performance Interval | Polling interval for performance metrics |
 
 ---
 
@@ -244,8 +262,9 @@ Response: `{ "policies": [{ "key": 1, "short_name": "static", "name": "High Perf
 
 The integration includes a layered permission resolver that can block specific actions globally or per managed object. Restrictions are configured in the integration options under **Restrictions**.
 
-### Resolution Chain (most specific wins)
+### Resolution Chain (first match wins)
 
+0. **vSphere privilege check** — if the account lacks the required privilege (e.g., `VirtualMachine.Interact.PowerOn`), the action is blocked regardless of user restrictions. Privileges are refreshed on every HA restart.
 1. Per-object per-action: `restrictions.{category}.{moref}.{action}`
 2. Per-object blanket: `restrictions.{category}.{moref}._all`
 3. Per-category per-action: `restrictions.categories.{category}.{action}`
@@ -345,7 +364,19 @@ data:
 
 - Verify the hostname/IP and port are reachable from your HA instance.
 - Check that the vSphere account has at least read-only access.
-- If using self-signed certificates, ensure **Verify SSL** is disabled.
+- If using self-signed certificates, either disable **Verify SSL** or provide the CA certificate path.
+- If a custom CA path is configured, verify the file exists at that path on the HA host.
+
+### Config flow doesn't show hosts/VMs in entity selection
+
+- Check HA logs for warnings about inventory enumeration failures.
+- If using a custom CA, ensure the CA path was entered in the connection step — it's needed for both the connection test and inventory enumeration.
+
+### Actions blocked despite no restrictions configured
+
+- The integration checks vSphere account privileges on every HA load. If your account lacks a privilege (e.g., `VirtualMachine.Interact.PowerOn`), the action is blocked at the resolver level.
+- Check logs for "vSphere privileges" debug entries to see which privileges were detected.
+- Grant the required privileges to the vSphere account via vCenter roles.
 
 ### Entities are unavailable after initial setup
 
