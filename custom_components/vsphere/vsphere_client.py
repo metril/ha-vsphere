@@ -164,6 +164,65 @@ class VSphereClient:
         finally:
             self._disconnect(conn)
 
+    def check_privileges(self) -> dict[str, bool]:
+        """Check which vSphere privileges the current session has.
+
+        Returns a dict mapping privilege ID strings to booleans.
+        Checks against the root folder so results apply globally.
+        """
+        from .const import (
+            PRIV_HOST_MAINTENANCE,
+            PRIV_HOST_POWER,
+            PRIV_HOST_POWER_MGMT,
+            PRIV_SYSTEM_READ,
+            PRIV_VM_MIGRATE,
+            PRIV_VM_POWER_OFF,
+            PRIV_VM_POWER_ON,
+            PRIV_VM_RESET,
+            PRIV_VM_SNAPSHOT_CREATE,
+            PRIV_VM_SNAPSHOT_REMOVE,
+            PRIV_VM_SUSPEND,
+        )
+
+        privs_to_check = [
+            PRIV_SYSTEM_READ,
+            PRIV_VM_POWER_ON,
+            PRIV_VM_POWER_OFF,
+            PRIV_VM_RESET,
+            PRIV_VM_SUSPEND,
+            PRIV_VM_SNAPSHOT_CREATE,
+            PRIV_VM_SNAPSHOT_REMOVE,
+            PRIV_VM_MIGRATE,
+            PRIV_HOST_POWER,
+            PRIV_HOST_MAINTENANCE,
+            PRIV_HOST_POWER_MGMT,
+        ]
+
+        conn = self._connect()
+        try:
+            content = conn.RetrieveContent()
+            auth_mgr = content.authorizationManager
+            session_id = content.sessionManager.currentSession.key
+
+            result = auth_mgr.HasPrivilegeOnEntity(
+                entity=content.rootFolder,
+                sessionId=session_id,
+                privId=privs_to_check,
+            )
+
+            # result is a list of vim.BoolPolicy or plain bools
+            privileges: dict[str, bool] = {}
+            for priv_id, has_priv in zip(privs_to_check, result, strict=False):
+                privileges[priv_id] = bool(has_priv)
+
+            _LOGGER.debug("vSphere privileges: %s", privileges)
+            return privileges
+        except Exception:
+            _LOGGER.debug("Failed to check privileges, assuming full access", exc_info=True)
+            return {p: True for p in privs_to_check}
+        finally:
+            self._disconnect(conn)
+
     # ------------------------------------------------------------------
     # Data fetching helpers
     # ------------------------------------------------------------------

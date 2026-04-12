@@ -14,6 +14,7 @@ from .const import (
     CONF_HOST,
     CONF_PASSWORD,
     CONF_PORT,
+    CONF_PRIVILEGES,
     CONF_RESTRICTIONS,
     CONF_USERNAME,
     CONF_VERIFY_SSL,
@@ -75,7 +76,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create permission resolver
     # ------------------------------------------------------------------
     restrictions: dict[str, Any] = entry.options.get(CONF_RESTRICTIONS, {})
-    resolver = PermissionResolver(restrictions)
+    privileges: dict[str, bool] = entry.options.get(CONF_PRIVILEGES, {})
+    resolver = PermissionResolver(restrictions, privileges)
 
     # ------------------------------------------------------------------
     # Create data coordinator

@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from .const import (
+    ACTION_PRIVILEGE_MAP,
     DESTRUCTIVE_ACTIONS,
     HOST_OPS_ACTIONS,
     RESTRICTION_GROUP_DESTRUCTIVE,
@@ -55,9 +56,16 @@ class PermissionResolver:
     broader restriction).
     """
 
-    def __init__(self, restrictions: dict[str, Any]) -> None:
-        """Store the restrictions configuration."""
+    def __init__(self, restrictions: dict[str, Any], privileges: dict[str, bool] | None = None) -> None:
+        """Store the restrictions configuration and vSphere account privileges.
+
+        Args:
+            restrictions: User-configured operation restrictions.
+            privileges: vSphere account privilege map from check_privileges().
+                        If None or empty, all privileges are assumed granted.
+        """
         self._restrictions = restrictions
+        self._privileges = privileges or {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -102,6 +110,14 @@ class PermissionResolver:
         ``blocked`` is True when the action is denied.
         ``reason`` is a human-readable description of the deciding rule.
         """
+        # ------------------------------------------------------------------
+        # Step 0: vSphere account privilege check
+        # ------------------------------------------------------------------
+        if self._privileges:
+            required_priv = ACTION_PRIVILEGE_MAP.get(action)
+            if required_priv and not self._privileges.get(required_priv, True):
+                return True, (f"{action} is blocked because the vSphere account lacks the '{required_priv}' privilege")
+
         obj_rules: dict[str, Any] = self._restrictions.get(category, {}).get(moref, {})
         cat_restrictions: dict[str, Any] = self._restrictions.get("categories", {}).get(category, {})
         global_rules: dict[str, Any] = self._restrictions.get("global", {})

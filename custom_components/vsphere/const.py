@@ -22,6 +22,7 @@ CONF_CATEGORIES: Final = "categories"
 CONF_ENTITY_FILTER: Final = "entity_filter"
 CONF_RESTRICTIONS: Final = "restrictions"
 CONF_PERF_INTERVAL: Final = "perf_interval"
+CONF_PRIVILEGES: Final = "privileges"
 
 # Defaults
 DEFAULT_PORT: Final = 443
@@ -138,3 +139,33 @@ VM_STATE_SUSPENDED: Final = "suspended"
 
 # License filtering
 INVALID_LICENSE_KEY: Final = "00000-00000-00000-00000-00000"
+
+# vSphere privilege IDs for capability detection
+PRIV_VM_POWER_ON: Final = "VirtualMachine.Interact.PowerOn"
+PRIV_VM_POWER_OFF: Final = "VirtualMachine.Interact.PowerOff"
+PRIV_VM_RESET: Final = "VirtualMachine.Interact.Reset"
+PRIV_VM_SUSPEND: Final = "VirtualMachine.Interact.Suspend"
+PRIV_VM_SNAPSHOT_CREATE: Final = "VirtualMachine.State.CreateSnapshot"
+PRIV_VM_SNAPSHOT_REMOVE: Final = "VirtualMachine.State.RemoveSnapshot"
+PRIV_VM_MIGRATE: Final = "Resource.HotMigrate"
+PRIV_HOST_POWER: Final = "Host.Config.Power"
+PRIV_HOST_MAINTENANCE: Final = "Host.Config.Maintenance"
+PRIV_HOST_POWER_MGMT: Final = "Host.Config.PowerManagement"
+PRIV_SYSTEM_READ: Final = "System.Read"
+
+# Map actions to required privileges
+ACTION_PRIVILEGE_MAP: Final[dict[str, str]] = {
+    VmAction.POWER_ON: PRIV_VM_POWER_ON,
+    VmAction.POWER_OFF: PRIV_VM_POWER_OFF,
+    VmAction.SHUTDOWN: PRIV_VM_POWER_OFF,
+    VmAction.REBOOT: PRIV_VM_POWER_OFF,
+    VmAction.RESET: PRIV_VM_RESET,
+    VmAction.SUSPEND: PRIV_VM_SUSPEND,
+    VmAction.SNAPSHOT_CREATE: PRIV_VM_SNAPSHOT_CREATE,
+    VmAction.SNAPSHOT_REMOVE: PRIV_VM_SNAPSHOT_REMOVE,
+    VmAction.MIGRATE: PRIV_VM_MIGRATE,
+    HostAction.SHUTDOWN: PRIV_HOST_POWER,
+    HostAction.REBOOT: PRIV_HOST_POWER,
+    HostAction.MAINTENANCE: PRIV_HOST_MAINTENANCE,
+    HostAction.POWER_POLICY: PRIV_HOST_POWER_MGMT,
+}

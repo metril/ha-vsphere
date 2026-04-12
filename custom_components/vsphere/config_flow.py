@@ -33,6 +33,7 @@ from .const import (
     CONF_PASSWORD,
     CONF_PERF_INTERVAL,
     CONF_PORT,
+    CONF_PRIVILEGES,
     CONF_RESTRICTIONS,
     CONF_USERNAME,
     CONF_VERIFY_SSL,
@@ -122,6 +123,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         self._inventory: dict[str, dict[str, Any]] = {}
         self._filterable_remaining: list[Category] = []
         self._current_filter_category: Category | None = None
+        self._privileges: dict[str, bool] = {}
 
     # ------------------------------------------------------------------
     # Step 1: user — connection details
@@ -347,7 +349,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------
 
     async def _test_connection(self, data: dict[str, Any]) -> dict[str, str]:
-        """Test vSphere connection; return error dict (empty on success)."""
+        """Test vSphere connection and check privileges; return error dict (empty on success)."""
         client = VSphereClient(
             host=data[CONF_HOST],
             port=data[CONF_PORT],
@@ -364,6 +366,14 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Unexpected error testing vSphere connection")
             return {"base": "unknown"}
+
+        # Check account privileges
+        try:
+            self._privileges = await self.hass.async_add_executor_job(client.check_privileges)
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("Privilege check failed, assuming full access")
+            self._privileges = {}
+
         return {}
 
     def _create_entry(self, perf_interval: int = DEFAULT_PERF_INTERVAL) -> ConfigFlowResult:
@@ -375,6 +385,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_ENTITY_FILTER: self._entity_filter,
             CONF_RESTRICTIONS: {},
             CONF_PERF_INTERVAL: perf_interval,
+            CONF_PRIVILEGES: getattr(self, "_privileges", {}),
         }
 
         return self.async_create_entry(
