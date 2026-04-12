@@ -303,6 +303,7 @@ class VSphereClient:
                         else 0.0,
                         "url": summary.url or "",
                         "connected_hosts": len(ds.host) if ds.host else 0,
+                        "host_morefs": [str(h.key._moId) for h in ds.host] if ds.host else [],  # noqa: SLF001
                         "virtual_machines": len(ds.vm) if ds.vm else 0,
                     }
                 except Exception:  # noqa: BLE001

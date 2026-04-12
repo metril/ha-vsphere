@@ -98,12 +98,19 @@ class VSphereEntity(CoordinatorEntity[VSphereData]):
 
         if object_type == "datastores":
             obj_data = (data or {}).get("datastores", {}).get(moref, {})
+            host_morefs = obj_data.get("host_morefs", [])
+            # Single-host: nest under that host. Multi-host: under root.
+            via = (
+                (DOMAIN, f"{entry.entry_id}_{host_morefs[0]}")
+                if len(host_morefs) == 1
+                else (DOMAIN, entry.entry_id)
+            )
             return DeviceInfo(
                 identifiers=identifiers,
                 name=name,
                 manufacturer="VMware",
                 model=obj_data.get("type", "Datastore").upper(),
-                via_device=(DOMAIN, entry.entry_id),
+                via_device=via,
             )
 
         if object_type == "clusters":
