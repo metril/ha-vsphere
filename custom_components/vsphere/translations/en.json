@@ -144,16 +144,6 @@
                     "vm_blocked_actions": "Selected actions will be blocked on this VM"
                 }
             },
-            "vm_another": {
-                "title": "VM Restrictions",
-                "description": "Would you like to edit restrictions on another VM?",
-                "data": {
-                    "restrict_another_vm": "Edit another VM"
-                },
-                "data_description": {
-                    "restrict_another_vm": "Select another VM to configure"
-                }
-            },
             "host_select": {
                 "title": "Select Host",
                 "description": "Choose an ESXi host to configure restrictions for.",
@@ -172,16 +162,6 @@
                 },
                 "data_description": {
                     "host_blocked_actions": "Selected actions will be blocked on this host"
-                }
-            },
-            "host_another": {
-                "title": "Host Restrictions",
-                "description": "Would you like to edit restrictions on another host?",
-                "data": {
-                    "restrict_another_host": "Edit another host"
-                },
-                "data_description": {
-                    "restrict_another_host": "Select another host to configure"
                 }
             },
             "restrictions_done": {
@@ -357,16 +337,6 @@
                     "vm_blocked_actions": "Selected actions will be blocked on this VM"
                 }
             },
-            "vm_another": {
-                "title": "VM Restrictions",
-                "description": "Would you like to edit restrictions on another VM?",
-                "data": {
-                    "restrict_another_vm": "Edit another VM"
-                },
-                "data_description": {
-                    "restrict_another_vm": "Select another VM to configure"
-                }
-            },
             "host_select": {
                 "title": "Select Host",
                 "description": "Choose an ESXi host to configure restrictions for.",
@@ -385,16 +355,6 @@
                 },
                 "data_description": {
                     "host_blocked_actions": "Selected actions will be blocked on this host"
-                }
-            },
-            "host_another": {
-                "title": "Host Restrictions",
-                "description": "Would you like to edit restrictions on another host?",
-                "data": {
-                    "restrict_another_host": "Edit another host"
-                },
-                "data_description": {
-                    "restrict_another_host": "Select another host to configure"
                 }
             },
             "save": {

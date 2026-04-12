@@ -489,7 +489,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 self._restrictions.get("vms", {}).pop(moref, None)
             self._current_vm_moref = None
-            return await self.async_step_vm_another()
+            return await self.async_step_restrictions_menu()
 
         current_actions = [k for k, v in self._restrictions.get("vms", {}).get(moref, {}).items() if v and k != "_all"]
         vm_action_options: list[SelectOptionDict] = sorted(
@@ -509,20 +509,8 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={"vm_name": name},
         )
 
-    async def async_step_vm_another(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask whether to edit restrictions on another VM."""
-        if user_input is not None:
-            if user_input.get("restrict_another_vm"):
-                return await self.async_step_vm_select()
-            return await self.async_step_restrictions_menu()
-
-        return self.async_show_form(
-            step_id="vm_another",
-            data_schema=vol.Schema({vol.Required("restrict_another_vm", default=False): BooleanSelector()}),
-        )
-
     # ------------------------------------------------------------------
-    # Per-host restrictions (select → actions → another loop)
+    # Per-host restrictions (select → actions → back to menu)
     # ------------------------------------------------------------------
 
     async def async_step_host_select(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -560,7 +548,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 self._restrictions.get("hosts", {}).pop(moref, None)
             self._current_host_moref = None
-            return await self.async_step_host_another()
+            return await self.async_step_restrictions_menu()
 
         current_actions = [
             k for k, v in self._restrictions.get("hosts", {}).get(moref, {}).items() if v and k != "_all"
@@ -580,18 +568,6 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
             ),
             description_placeholders={"host_name": name},
-        )
-
-    async def async_step_host_another(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask whether to edit restrictions on another host."""
-        if user_input is not None:
-            if user_input.get("restrict_another_host"):
-                return await self.async_step_host_select()
-            return await self.async_step_restrictions_menu()
-
-        return self.async_show_form(
-            step_id="host_another",
-            data_schema=vol.Schema({vol.Required("restrict_another_host", default=False): BooleanSelector()}),
         )
 
     # ------------------------------------------------------------------
@@ -949,7 +925,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
             else:
                 self._restrictions.get("vms", {}).pop(moref, None)
             self._current_vm_moref = None
-            return await self.async_step_vm_another()
+            return await self.async_step_restrictions_menu()
 
         # Pre-populate with existing restrictions for this VM
         current_actions = [k for k, v in self._restrictions.get("vms", {}).get(moref, {}).items() if v and k != "_all"]
@@ -970,20 +946,8 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
             description_placeholders={"vm_name": name},
         )
 
-    async def async_step_vm_another(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask whether to edit restrictions on another VM."""
-        if user_input is not None:
-            if user_input.get("restrict_another_vm"):
-                return await self.async_step_vm_select()
-            return await self.async_step_restrictions_menu()
-
-        return self.async_show_form(
-            step_id="vm_another",
-            data_schema=vol.Schema({vol.Required("restrict_another_vm", default=False): BooleanSelector()}),
-        )
-
     # ------------------------------------------------------------------
-    # Per-host restrictions (select → actions → another loop)
+    # Per-host restrictions (select → actions → back to menu)
     # ------------------------------------------------------------------
 
     async def async_step_host_select(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -1022,7 +986,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
             else:
                 self._restrictions.get("hosts", {}).pop(moref, None)
             self._current_host_moref = None
-            return await self.async_step_host_another()
+            return await self.async_step_restrictions_menu()
 
         # Pre-populate with existing restrictions for this host
         current_actions = [
@@ -1043,18 +1007,6 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
                 }
             ),
             description_placeholders={"host_name": name},
-        )
-
-    async def async_step_host_another(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask whether to edit restrictions on another host."""
-        if user_input is not None:
-            if user_input.get("restrict_another_host"):
-                return await self.async_step_host_select()
-            return await self.async_step_restrictions_menu()
-
-        return self.async_show_form(
-            step_id="host_another",
-            data_schema=vol.Schema({vol.Required("restrict_another_host", default=False): BooleanSelector()}),
         )
 
     # ------------------------------------------------------------------
