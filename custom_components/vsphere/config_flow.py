@@ -24,6 +24,7 @@ from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
+    section,
 )
 
 from .const import (
@@ -71,6 +72,22 @@ _CATEGORY_DISPLAY_NAMES: dict[Category, str] = {
     Category.RESOURCE_POOLS: "Resource Pools",
 }
 
+_CORE_CATEGORIES: list[Category] = [
+    Category.HOSTS,
+    Category.VMS,
+    Category.DATASTORES,
+    Category.LICENSES,
+]
+
+_ADVANCED_CATEGORIES: list[Category] = [
+    Category.CLUSTERS,
+    Category.NETWORK,
+    Category.RESOURCE_POOLS,
+    Category.STORAGE_ADVANCED,
+    Category.PERFORMANCE,
+    Category.EVENTS_ALARMS,
+]
+
 
 def _connection_schema(
     defaults: dict[str, Any] | None = None,
@@ -87,39 +104,106 @@ def _connection_schema(
                 TextSelectorConfig(type=TextSelectorType.TEXT)
             ),
             vol.Required(CONF_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
-            vol.Required(CONF_VERIFY_SSL, default=d.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)): BooleanSelector(),
-            vol.Optional(CONF_SSL_CA_PATH, default=d.get(CONF_SSL_CA_PATH, "")): TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT)
+            vol.Required("ssl_options"): section(
+                vol.Schema(
+                    {
+                        vol.Required(
+                            CONF_VERIFY_SSL,
+                            default=d.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+                        ): BooleanSelector(),
+                        vol.Optional(
+                            CONF_SSL_CA_PATH,
+                            default=d.get(CONF_SSL_CA_PATH, ""),
+                        ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
+                    }
+                ),
+                {"collapsed": True},
             ),
         }
     )
 
 
-def _categories_schema(defaults: dict[str, bool] | None = None) -> vol.Schema:
-    """Return the categories step schema."""
+def _categories_schema(
+    defaults: dict[str, bool] | None = None,
+    perf_interval: int = DEFAULT_PERF_INTERVAL,
+) -> vol.Schema:
+    """Return the categories step schema with core and advanced sections."""
     effective = dict(DEFAULT_CATEGORIES)
     if defaults:
         effective.update(defaults)
-    return vol.Schema(
-        {vol.Required(cat.value, default=effective.get(cat.value, False)): BooleanSelector() for cat in Category}
-    )
 
-
-def _intervals_schema(default_interval: int = DEFAULT_PERF_INTERVAL) -> vol.Schema:
-    """Return the intervals step schema."""
-    return vol.Schema(
+    core_schema = vol.Schema(
         {
-            vol.Required(CONF_PERF_INTERVAL, default=default_interval): NumberSelector(
-                NumberSelectorConfig(
-                    min=MIN_PERF_INTERVAL,
-                    max=MAX_PERF_INTERVAL,
-                    step=1,
-                    mode=NumberSelectorMode.BOX,
-                    unit_of_measurement="seconds",
-                )
-            ),
+            vol.Required(cat.value, default=effective.get(cat.value, False)): BooleanSelector()
+            for cat in _CORE_CATEGORIES
         }
     )
+
+    advanced_fields: dict[Any, Any] = {
+        vol.Required(cat.value, default=effective.get(cat.value, False)): BooleanSelector()
+        for cat in _ADVANCED_CATEGORIES
+    }
+    advanced_fields[vol.Required(CONF_PERF_INTERVAL, default=perf_interval)] = NumberSelector(
+        NumberSelectorConfig(
+            min=MIN_PERF_INTERVAL,
+            max=MAX_PERF_INTERVAL,
+            step=30,
+            mode=NumberSelectorMode.SLIDER,
+            unit_of_measurement="seconds",
+        )
+    )
+    advanced_schema = vol.Schema(advanced_fields)
+
+    return vol.Schema(
+        {
+            vol.Required("core_categories"): section(core_schema, {"collapsed": False}),
+            vol.Required("advanced_categories"): section(advanced_schema, {"collapsed": True}),
+        }
+    )
+
+
+def _restrictions_schema(
+    current_restrictions: dict[str, Any] | None = None,
+) -> vol.Schema:
+    """Return the global restrictions step schema."""
+    global_restrictions: dict[str, Any] = (current_restrictions or {}).get("global", {})
+    return vol.Schema(
+        {
+            vol.Required(
+                "block_destructive",
+                default=global_restrictions.get("destructive", False),
+            ): BooleanSelector(),
+            vol.Required(
+                "block_snapshots",
+                default=global_restrictions.get("snapshots", False),
+            ): BooleanSelector(),
+            vol.Required(
+                "block_migrate",
+                default=global_restrictions.get("migrate", False),
+            ): BooleanSelector(),
+            vol.Required(
+                "block_host_ops",
+                default=global_restrictions.get("host_ops", False),
+            ): BooleanSelector(),
+        }
+    )
+
+
+def _flatten_ssl_section(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Flatten the ssl_options section from user_input."""
+    ssl_opts = user_input.pop("ssl_options", {})
+    user_input.update(ssl_opts)
+    return user_input
+
+
+def _flatten_category_sections(user_input: dict[str, Any]) -> tuple[dict[str, bool], int]:
+    """Flatten core/advanced sections and return categories dict and perf_interval."""
+    core = user_input.pop("core_categories", {})
+    advanced = user_input.pop("advanced_categories", {})
+    merged = {**core, **advanced}
+    categories = {cat.value: merged.get(cat.value, False) for cat in Category}
+    perf_interval = int(merged.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL))
+    return categories, perf_interval
 
 
 class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -136,9 +220,11 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         self._filterable_remaining: list[Category] = []
         self._current_filter_category: Category | None = None
         self._privileges: dict[str, bool] = {}
+        self._restrictions: dict[str, Any] = {}
+        self._perf_interval: int = DEFAULT_PERF_INTERVAL
 
     # ------------------------------------------------------------------
-    # Step 1: user — connection details
+    # Step 1: user -- connection details
     # ------------------------------------------------------------------
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -146,6 +232,9 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            # Flatten SSL section
+            _flatten_ssl_section(user_input)
+
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
 
@@ -170,7 +259,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle monitoring category selection."""
         if user_input is not None:
-            self._categories = {cat.value: user_input.get(cat.value, False) for cat in Category}
+            self._categories, self._perf_interval = _flatten_category_sections(user_input)
             return await self._start_entity_selection()
 
         return self.async_show_form(
@@ -206,7 +295,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _next_entity_selection_step(self) -> ConfigFlowResult:
         """Advance to the entity selection for the next category, or move on."""
         if not self._filterable_remaining:
-            return await self.async_step_intervals()
+            return await self.async_step_setup_restrictions()
 
         self._current_filter_category = self._filterable_remaining.pop(0)
         return await self.async_step_entity_selection()
@@ -215,14 +304,13 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle entity selection for the current category."""
         category = self._current_filter_category
         if category is None:
-            return await self.async_step_intervals()
+            return await self.async_step_setup_restrictions()
 
         if user_input is not None:
-            select_all: bool = user_input.get("select_all", True)
-            if select_all:
+            selected: list[str] = user_input.get("selected_objects", [])
+            if not selected:
                 self._entity_filter[category.value] = {"mode": FILTER_MODE_ALL}
             else:
-                selected: list[str] = user_input.get("selected_objects", [])
                 self._entity_filter[category.value] = {
                     "mode": FILTER_MODE_SELECT,
                     "morefs": selected,
@@ -246,12 +334,11 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
 
         data_schema = vol.Schema(
             {
-                vol.Required("select_all", default=True): BooleanSelector(),
                 vol.Optional("selected_objects", default=[]): SelectSelector(
                     SelectSelectorConfig(
                         options=options,
                         multiple=True,
-                        mode=SelectSelectorMode.LIST,
+                        mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
             }
@@ -264,23 +351,110 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # ------------------------------------------------------------------
-    # Step 4: intervals (only if Performance enabled)
+    # Step 4: setup_restrictions -- ask whether to configure restrictions
     # ------------------------------------------------------------------
 
-    async def async_step_intervals(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle polling interval configuration."""
-        perf_enabled = self._categories.get(Category.PERFORMANCE, False)
-
-        if not perf_enabled:
+    async def async_step_setup_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask whether to configure operation restrictions during initial setup."""
+        if user_input is not None:
+            if user_input.get("configure_restrictions"):
+                return await self.async_step_restrictions()
             return self._create_entry()
 
+        return self.async_show_form(
+            step_id="setup_restrictions",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("configure_restrictions", default=False): BooleanSelector(),
+                }
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Step 5: restrictions -- global restriction shortcuts
+    # ------------------------------------------------------------------
+
+    async def async_step_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle global operation restriction shortcuts."""
         if user_input is not None:
-            perf_interval = int(user_input[CONF_PERF_INTERVAL])
-            return self._create_entry(perf_interval=perf_interval)
+            self._restrictions["global"] = {
+                "destructive": user_input.get("block_destructive", False),
+                "snapshots": user_input.get("block_snapshots", False),
+                "migrate": user_input.get("block_migrate", False),
+                "host_ops": user_input.get("block_host_ops", False),
+            }
+            return await self.async_step_object_restrictions()
 
         return self.async_show_form(
-            step_id="intervals",
-            data_schema=_intervals_schema(),
+            step_id="restrictions",
+            data_schema=_restrictions_schema(self._restrictions),
+        )
+
+    # ------------------------------------------------------------------
+    # Step 6: object_restrictions -- per-host/VM action restrictions
+    # ------------------------------------------------------------------
+
+    async def async_step_object_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle per-object operation restrictions."""
+        if user_input is not None:
+            vm_restrictions: dict[str, dict[str, bool]] = {}
+            for vm_moref in user_input.get("restricted_vms", []):
+                vm_restrictions[vm_moref] = {a: True for a in user_input.get("vm_blocked_actions", [])}
+
+            host_restrictions: dict[str, dict[str, bool]] = {}
+            for host_moref in user_input.get("restricted_hosts", []):
+                host_restrictions[host_moref] = {a: True for a in user_input.get("host_blocked_actions", [])}
+
+            self._restrictions["vms"] = vm_restrictions
+            self._restrictions["hosts"] = host_restrictions
+
+            return self._create_entry()
+
+        # Build VM and host options from inventory
+        from .const import HostAction, VmAction  # noqa: PLC0415
+
+        vm_options: list[SelectOptionDict] = [
+            SelectOptionDict(value=moref, label=info.get("name", moref))
+            for moref, info in self._inventory.items()
+            if info.get("type") == "vm"
+        ]
+        host_options: list[SelectOptionDict] = [
+            SelectOptionDict(value=moref, label=info.get("name", moref))
+            for moref, info in self._inventory.items()
+            if info.get("type") == "host"
+        ]
+
+        if not vm_options and not host_options:
+            return self._create_entry()
+
+        vm_action_options = [SelectOptionDict(value=a.value, label=a.value.replace("_", " ").title()) for a in VmAction]
+        host_action_options = [
+            SelectOptionDict(value=a.value, label=a.value.replace("_", " ").title()) for a in HostAction
+        ]
+
+        schema_fields: dict[Any, Any] = {}
+
+        if vm_options:
+            current_restricted_vms = list(self._restrictions.get("vms", {}).keys())
+            schema_fields[vol.Optional("restricted_vms", default=current_restricted_vms)] = SelectSelector(
+                SelectSelectorConfig(options=vm_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+            )
+            schema_fields[vol.Optional("vm_blocked_actions", default=[])] = SelectSelector(
+                SelectSelectorConfig(options=vm_action_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+            )
+
+        if host_options:
+            current_restricted_hosts = list(self._restrictions.get("hosts", {}).keys())
+            schema_fields[vol.Optional("restricted_hosts", default=current_restricted_hosts)] = SelectSelector(
+                SelectSelectorConfig(options=host_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+            )
+            schema_fields[vol.Optional("host_blocked_actions", default=[])] = SelectSelector(
+                SelectSelectorConfig(options=host_action_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+            )
+
+        return self.async_show_form(
+            step_id="object_restrictions",
+            data_schema=vol.Schema(schema_fields),
         )
 
     # ------------------------------------------------------------------
@@ -332,6 +506,9 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         existing_data = dict(reconfigure_entry.data)
 
         if user_input is not None:
+            # Flatten SSL section
+            _flatten_ssl_section(user_input)
+
             errors = await self._test_connection(user_input)
             if not errors:
                 new_unique_id = f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
@@ -398,15 +575,15 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return {}
 
-    def _create_entry(self, perf_interval: int = DEFAULT_PERF_INTERVAL) -> ConfigFlowResult:
+    def _create_entry(self) -> ConfigFlowResult:
         """Create the config entry with collected data."""
         host = self._connection_data[CONF_HOST]
 
         options: dict[str, Any] = {
             CONF_CATEGORIES: self._categories,
             CONF_ENTITY_FILTER: self._entity_filter,
-            CONF_RESTRICTIONS: {},
-            CONF_PERF_INTERVAL: perf_interval,
+            CONF_RESTRICTIONS: self._restrictions,
+            CONF_PERF_INTERVAL: self._perf_interval,
             CONF_PRIVILEGES: self._privileges,
         }
 
@@ -432,7 +609,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         self._restrictions: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
-    # Step 1: init — category toggles + perf interval
+    # Step 1: init -- category toggles (sectioned) + perf interval
     # ------------------------------------------------------------------
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -442,33 +619,18 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         current_perf_interval: int = current_options.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)
 
         if user_input is not None:
-            self._new_categories = {cat.value: user_input.get(cat.value, False) for cat in Category}
-            self._new_perf_interval = int(user_input.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL))
+            self._new_categories, self._new_perf_interval = _flatten_category_sections(user_input)
             # Preserve existing entity filter, will be updated in entity_selection step
             self._entity_filter = dict(current_options.get(CONF_ENTITY_FILTER, {}))
             return await self._start_entity_selection()
 
-        schema_fields: dict[Any, Any] = {
-            vol.Required(cat.value, default=current_categories.get(cat.value, False)): BooleanSelector()
-            for cat in Category
-        }
-        schema_fields[vol.Required(CONF_PERF_INTERVAL, default=current_perf_interval)] = NumberSelector(
-            NumberSelectorConfig(
-                min=MIN_PERF_INTERVAL,
-                max=MAX_PERF_INTERVAL,
-                step=1,
-                mode=NumberSelectorMode.BOX,
-                unit_of_measurement="seconds",
-            )
-        )
-
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(schema_fields),
+            data_schema=_categories_schema(current_categories, current_perf_interval),
         )
 
     # ------------------------------------------------------------------
-    # Step 2: entity_selection — per-category object selection
+    # Step 2: entity_selection -- per-category object selection
     # ------------------------------------------------------------------
 
     async def _start_entity_selection(self) -> ConfigFlowResult:
@@ -505,11 +667,10 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
             return await self.async_step_restrictions()
 
         if user_input is not None:
-            select_all: bool = user_input.get("select_all", True)
-            if select_all:
+            selected: list[str] = user_input.get("selected_objects", [])
+            if not selected:
                 self._entity_filter[category.value] = {"mode": FILTER_MODE_ALL}
             else:
-                selected: list[str] = user_input.get("selected_objects", [])
                 self._entity_filter[category.value] = {
                     "mode": FILTER_MODE_SELECT,
                     "morefs": selected,
@@ -532,17 +693,15 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
 
         # Determine existing defaults for this category
         existing_filter = self._entity_filter.get(category.value, {})
-        default_select_all = existing_filter.get("mode", FILTER_MODE_ALL) == FILTER_MODE_ALL
         default_selected = existing_filter.get("morefs", [])
 
         data_schema = vol.Schema(
             {
-                vol.Required("select_all", default=default_select_all): BooleanSelector(),
                 vol.Optional("selected_objects", default=default_selected): SelectSelector(
                     SelectSelectorConfig(
                         options=options,
                         multiple=True,
-                        mode=SelectSelectorMode.LIST,
+                        mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
             }
@@ -555,7 +714,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         )
 
     # ------------------------------------------------------------------
-    # Step 3: restrictions — global restriction shortcuts
+    # Step 3: restrictions -- global restriction shortcuts
     # ------------------------------------------------------------------
 
     async def async_step_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -575,35 +734,13 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
             # Move to per-object restrictions
             return await self.async_step_object_restrictions()
 
-        global_restrictions: dict[str, Any] = current_restrictions.get("global", {})
-        data_schema = vol.Schema(
-            {
-                vol.Required(
-                    "block_destructive",
-                    default=global_restrictions.get("destructive", False),
-                ): BooleanSelector(),
-                vol.Required(
-                    "block_snapshots",
-                    default=global_restrictions.get("snapshots", False),
-                ): BooleanSelector(),
-                vol.Required(
-                    "block_migrate",
-                    default=global_restrictions.get("migrate", False),
-                ): BooleanSelector(),
-                vol.Required(
-                    "block_host_ops",
-                    default=global_restrictions.get("host_ops", False),
-                ): BooleanSelector(),
-            }
-        )
-
         return self.async_show_form(
             step_id="restrictions",
-            data_schema=data_schema,
+            data_schema=_restrictions_schema(current_restrictions),
         )
 
     # ------------------------------------------------------------------
-    # Step 4: object_restrictions — per-host/VM action restrictions
+    # Step 4: object_restrictions -- per-host/VM action restrictions
     # ------------------------------------------------------------------
 
     async def async_step_object_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -611,9 +748,6 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         current_options = dict(self.config_entry.options)
 
         if user_input is not None:
-            # Build per-object restrictions from form input.
-            # Note: the same action set is applied to all selected objects in each category.
-            # Per-object differentiation requires editing restrictions individually.
             vm_restrictions: dict[str, dict[str, bool]] = {}
             for vm_moref in user_input.get("restricted_vms", []):
                 vm_restrictions[vm_moref] = {a: True for a in user_input.get("vm_blocked_actions", [])}
@@ -662,7 +796,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
             first_host = self._restrictions.get("hosts", {}).get(current_restricted_hosts[0], {})
             current_host_actions = [k for k, v in first_host.items() if v and k != "_all"]
 
-        from .const import HostAction, VmAction
+        from .const import HostAction, VmAction  # noqa: PLC0415
 
         vm_action_options = [SelectOptionDict(value=a.value, label=a.value.replace("_", " ").title()) for a in VmAction]
         host_action_options = [
@@ -688,7 +822,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
             )
 
         if not schema_fields:
-            # No hosts or VMs available — skip to save
+            # No hosts or VMs available -- skip to save
             return self.async_create_entry(
                 data={
                     **current_options,

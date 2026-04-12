@@ -3,19 +3,33 @@
         "step": {
             "user": {
                 "title": "vSphere Connection",
-                "description": "Enter your vCenter or ESXi host credentials. For vCenter, use user@domain format. For ESXi, use the local account name.",
+                "description": "Enter your vCenter or ESXi host credentials.",
                 "data": {
                     "host": "Host",
                     "port": "Port",
                     "username": "Username",
                     "password": "Password",
                     "verify_ssl": "Verify SSL certificate",
-                    "ssl_ca_path": "CA certificate path (optional, e.g. /ssl/vsphere-ca.pem)"
+                    "ssl_ca_path": "CA certificate path"
+                },
+                "data_description": {
+                    "host": "IP address or hostname of your vCenter or ESXi server",
+                    "port": "Usually 443 for HTTPS connections",
+                    "username": "For vCenter use user@domain.com format. For ESXi use local account name (e.g., root)",
+                    "password": "Your vSphere account password",
+                    "verify_ssl": "Enable to verify the server's SSL certificate. Disable for self-signed certificates",
+                    "ssl_ca_path": "Path to a PEM-encoded CA certificate file on the HA host. Only needed with a private/internal CA"
+                },
+                "sections": {
+                    "ssl_options": {
+                        "name": "SSL / Certificate Options",
+                        "description": "Configure SSL verification and custom CA certificates"
+                    }
                 }
             },
             "categories": {
                 "title": "Monitoring Categories",
-                "description": "Select which categories to monitor.",
+                "description": "Select which vSphere objects and features to monitor.",
                 "data": {
                     "hosts": "Hosts",
                     "vms": "Virtual Machines",
@@ -26,22 +40,83 @@
                     "resource_pools": "Resource Pools",
                     "storage_advanced": "Advanced Storage",
                     "performance": "Performance Metrics",
-                    "events_alarms": "Events & Alarms"
+                    "events_alarms": "Events & Alarms",
+                    "perf_interval": "Performance polling interval (seconds)"
+                },
+                "data_description": {
+                    "hosts": "Monitor ESXi host CPU, memory, uptime, and power state",
+                    "vms": "Monitor virtual machine resources, snapshots, and guest info",
+                    "datastores": "Monitor storage capacity and usage",
+                    "licenses": "Track license status and expiration",
+                    "clusters": "Monitor DRS and HA cluster status",
+                    "network": "Monitor vSwitch, port group, and physical NIC status",
+                    "resource_pools": "Monitor resource pool CPU/memory reservations",
+                    "storage_advanced": "Per-VM disk and storage policy details",
+                    "performance": "Real-time CPU/memory/disk/network metrics (polled)",
+                    "events_alarms": "vSphere alarm tracking and HA event notifications",
+                    "perf_interval": "How often to poll performance metrics. Lower values increase API load"
+                },
+                "sections": {
+                    "core_categories": {
+                        "name": "Core Monitoring",
+                        "description": "Primary vSphere objects to monitor"
+                    },
+                    "advanced_categories": {
+                        "name": "Advanced Monitoring",
+                        "description": "Additional monitoring features (disabled by default)"
+                    }
                 }
             },
             "entity_selection": {
                 "title": "{category} Selection",
-                "description": "Choose which {category} to monitor. Toggle 'Monitor all' to automatically include newly added objects, or disable it to pick specific ones from the list below.",
+                "description": "Select specific {category} to monitor. Leave the list empty to monitor all {category}, including any added in the future.",
                 "data": {
-                    "select_all": "Monitor all {category} (including future additions)",
-                    "selected_objects": "Select specific {category}"
+                    "selected_objects": "Objects to monitor"
+                },
+                "data_description": {
+                    "selected_objects": "Leave empty to monitor all (including future additions). Select specific objects to limit monitoring"
                 }
             },
-            "intervals": {
-                "title": "Polling Intervals",
-                "description": "Configure polling intervals for performance metrics.",
+            "setup_restrictions": {
+                "title": "Operation Restrictions",
+                "description": "Would you like to configure operation restrictions? You can block specific actions on hosts or VMs to prevent accidental operations.",
                 "data": {
-                    "perf_interval": "Performance metrics interval (seconds)"
+                    "configure_restrictions": "Configure operation restrictions now"
+                },
+                "data_description": {
+                    "configure_restrictions": "You can always configure restrictions later in the integration options"
+                }
+            },
+            "restrictions": {
+                "title": "Global Operation Restrictions",
+                "description": "Block categories of operations across all hosts and VMs.",
+                "data": {
+                    "block_destructive": "Block destructive operations",
+                    "block_snapshots": "Block all snapshot operations",
+                    "block_migrate": "Block VM migration",
+                    "block_host_ops": "Block all host operations"
+                },
+                "data_description": {
+                    "block_destructive": "Blocks: power off, shutdown, hard reset, and snapshot removal",
+                    "block_snapshots": "Blocks: snapshot creation and removal",
+                    "block_migrate": "Blocks: VM migration (vMotion) between hosts",
+                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes"
+                }
+            },
+            "object_restrictions": {
+                "title": "Per-Object Restrictions",
+                "description": "Block specific actions on individual hosts or VMs. Select the objects to restrict, then choose which actions to block on them.",
+                "data": {
+                    "restricted_vms": "VMs to restrict",
+                    "vm_blocked_actions": "Actions to block on selected VMs",
+                    "restricted_hosts": "Hosts to restrict",
+                    "host_blocked_actions": "Actions to block on selected hosts"
+                },
+                "data_description": {
+                    "restricted_vms": "The selected blocked actions will apply to all chosen VMs",
+                    "vm_blocked_actions": "These actions will be blocked on all VMs selected above",
+                    "restricted_hosts": "The selected blocked actions will apply to all chosen hosts",
+                    "host_blocked_actions": "These actions will be blocked on all hosts selected above"
                 }
             },
             "reauth_confirm": {
@@ -61,7 +136,15 @@
                     "username": "Username",
                     "password": "Password",
                     "verify_ssl": "Verify SSL certificate",
-                    "ssl_ca_path": "CA certificate path (optional, e.g. /ssl/vsphere-ca.pem)"
+                    "ssl_ca_path": "CA certificate path"
+                },
+                "data_description": {
+                    "host": "IP address or hostname of your vCenter or ESXi server",
+                    "port": "Usually 443 for HTTPS connections",
+                    "username": "For vCenter use user@domain.com format. For ESXi use local account name (e.g., root)",
+                    "password": "Your vSphere account password",
+                    "verify_ssl": "Enable to verify the server's SSL certificate. Disable for self-signed certificates",
+                    "ssl_ca_path": "Path to a PEM-encoded CA certificate file on the HA host. Only needed with a private/internal CA"
                 }
             }
         },
@@ -92,24 +175,55 @@
                     "performance": "Performance Metrics",
                     "events_alarms": "Events & Alarms",
                     "perf_interval": "Performance polling interval (seconds)"
+                },
+                "data_description": {
+                    "hosts": "Monitor ESXi host CPU, memory, uptime, and power state",
+                    "vms": "Monitor virtual machine resources, snapshots, and guest info",
+                    "datastores": "Monitor storage capacity and usage",
+                    "licenses": "Track license status and expiration",
+                    "clusters": "Monitor DRS and HA cluster status",
+                    "network": "Monitor vSwitch, port group, and physical NIC status",
+                    "resource_pools": "Monitor resource pool CPU/memory reservations",
+                    "storage_advanced": "Per-VM disk and storage policy details",
+                    "performance": "Real-time CPU/memory/disk/network metrics (polled)",
+                    "events_alarms": "vSphere alarm tracking and HA event notifications",
+                    "perf_interval": "How often to poll performance metrics. Lower values increase API load"
+                },
+                "sections": {
+                    "core_categories": {
+                        "name": "Core Monitoring",
+                        "description": "Primary vSphere objects to monitor"
+                    },
+                    "advanced_categories": {
+                        "name": "Advanced Monitoring",
+                        "description": "Additional monitoring features (disabled by default)"
+                    }
                 }
             },
             "entity_selection": {
                 "title": "{category} Selection",
-                "description": "Choose which {category} to monitor. Toggle 'Monitor all' to automatically include newly added objects, or disable it to pick specific ones.",
+                "description": "Select specific {category} to monitor. Leave the list empty to monitor all {category}, including any added in the future.",
                 "data": {
-                    "select_all": "Monitor all {category} (including future additions)",
-                    "selected_objects": "Select specific {category}"
+                    "selected_objects": "Objects to monitor"
+                },
+                "data_description": {
+                    "selected_objects": "Leave empty to monitor all (including future additions). Select specific objects to limit monitoring"
                 }
             },
             "restrictions": {
                 "title": "Global Operation Restrictions",
                 "description": "Block categories of operations across all hosts and VMs.",
                 "data": {
-                    "block_destructive": "Block destructive operations (power off, shutdown, reset, remove snapshots)",
+                    "block_destructive": "Block destructive operations",
                     "block_snapshots": "Block all snapshot operations",
                     "block_migrate": "Block VM migration",
                     "block_host_ops": "Block all host operations"
+                },
+                "data_description": {
+                    "block_destructive": "Blocks: power off, shutdown, hard reset, and snapshot removal",
+                    "block_snapshots": "Blocks: snapshot creation and removal",
+                    "block_migrate": "Blocks: VM migration (vMotion) between hosts",
+                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes"
                 }
             },
             "object_restrictions": {
@@ -120,6 +234,12 @@
                     "vm_blocked_actions": "Actions to block on selected VMs",
                     "restricted_hosts": "Hosts to restrict",
                     "host_blocked_actions": "Actions to block on selected hosts"
+                },
+                "data_description": {
+                    "restricted_vms": "The selected blocked actions will apply to all chosen VMs",
+                    "vm_blocked_actions": "These actions will be blocked on all VMs selected above",
+                    "restricted_hosts": "The selected blocked actions will apply to all chosen hosts",
+                    "host_blocked_actions": "These actions will be blocked on all hosts selected above"
                 }
             }
         }
