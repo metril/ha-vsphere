@@ -67,7 +67,7 @@
                             "storage_advanced": "Per-VM disk and storage policy details",
                             "performance": "Real-time CPU/memory/disk/network metrics (polled)",
                             "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics (seconds). Lower values increase API load"
+                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour"
                         }
                     }
                 }
@@ -239,7 +239,7 @@
                             "storage_advanced": "Per-VM disk and storage policy details",
                             "performance": "Real-time CPU/memory/disk/network metrics (polled)",
                             "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics (seconds). Lower values increase API load"
+                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour"
                         }
                     }
                 }

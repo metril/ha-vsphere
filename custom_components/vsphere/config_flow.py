@@ -642,7 +642,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------
 
     async def _test_connection(self, data: dict[str, Any]) -> dict[str, str]:
-        """Test vSphere connection and check privileges; return error dict (empty on success)."""
+        """Test vSphere connection; return error dict (empty on success)."""
         # Validate CA file path if provided
         ca_path = data.get(CONF_SSL_CA_PATH, "")
         if ca_path:
