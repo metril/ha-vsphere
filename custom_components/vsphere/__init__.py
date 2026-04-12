@@ -47,6 +47,16 @@ PLATFORMS: list[Platform] = [
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up vSphere Control from a config entry."""
     # ------------------------------------------------------------------
+    # Validate CA file if configured
+    # ------------------------------------------------------------------
+    ssl_ca_path = entry.data.get(CONF_SSL_CA_PATH, "")
+    if ssl_ca_path:
+        from pathlib import Path  # noqa: PLC0415
+
+        if not Path(ssl_ca_path).is_file():
+            raise ConfigEntryNotReady(f"CA certificate file not found: {ssl_ca_path}")
+
+    # ------------------------------------------------------------------
     # Create the client and test connectivity
     # ------------------------------------------------------------------
     client = VSphereClient(
