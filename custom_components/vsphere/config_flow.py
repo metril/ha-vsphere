@@ -232,18 +232,19 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Flatten SSL section
-            _flatten_ssl_section(user_input)
+            # Flatten SSL section into a copy (preserve original for form re-render)
+            flat_input = dict(user_input)
+            _flatten_ssl_section(flat_input)
 
-            host = user_input[CONF_HOST]
-            port = user_input[CONF_PORT]
-
-            await self.async_set_unique_id(f"{host}:{port}")
-            self._abort_if_unique_id_configured()
-
-            errors = await self._test_connection(user_input)
+            errors = await self._test_connection(flat_input)
             if not errors:
-                self._connection_data = user_input
+                # Set unique ID only after successful connection test
+                host = flat_input[CONF_HOST]
+                port = flat_input[CONF_PORT]
+                await self.async_set_unique_id(f"{host}:{port}")
+                self._abort_if_unique_id_configured()
+
+                self._connection_data = flat_input
                 return await self.async_step_categories()
 
         return self.async_show_form(
@@ -506,17 +507,18 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         existing_data = dict(reconfigure_entry.data)
 
         if user_input is not None:
-            # Flatten SSL section
-            _flatten_ssl_section(user_input)
+            # Flatten SSL section into a copy (preserve original for form re-render)
+            flat_input = dict(user_input)
+            _flatten_ssl_section(flat_input)
 
-            errors = await self._test_connection(user_input)
+            errors = await self._test_connection(flat_input)
             if not errors:
-                new_unique_id = f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
+                new_unique_id = f"{flat_input[CONF_HOST]}:{flat_input[CONF_PORT]}"
                 await self.async_set_unique_id(new_unique_id)
-                self._abort_if_unique_id_configured(updates={**existing_data, **user_input})
+                self._abort_if_unique_id_configured(updates={**existing_data, **flat_input})
                 return self.async_update_reload_and_abort(
                     reconfigure_entry,
-                    data={**existing_data, **user_input},
+                    data={**existing_data, **flat_input},
                 )
 
         return self.async_show_form(

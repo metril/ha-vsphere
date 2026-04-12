@@ -145,6 +145,12 @@
                     "password": "Your vSphere account password",
                     "verify_ssl": "Enable to verify the server's SSL certificate. Disable for self-signed certificates",
                     "ssl_ca_path": "Path to a PEM-encoded CA certificate file on the HA host. Only needed with a private/internal CA"
+                },
+                "sections": {
+                    "ssl_options": {
+                        "name": "SSL / Certificate Options",
+                        "description": "Configure SSL verification and custom CA certificates"
+                    }
                 }
             }
         },
