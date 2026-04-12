@@ -8,70 +8,59 @@
                     "host": "Host",
                     "port": "Port",
                     "username": "Username",
-                    "password": "Password"
+                    "password": "Password",
+                    "verify_ssl": "Verify SSL certificate",
+                    "ssl_ca_path": "CA certificate path"
                 },
                 "data_description": {
                     "host": "IP address or hostname of your vCenter or ESXi server",
                     "port": "Usually 443 for HTTPS connections",
                     "username": "For vCenter use user@domain.com format. For ESXi use local account name (e.g., root)",
-                    "password": "Your vSphere account password"
+                    "password": "Your vSphere account password",
+                    "verify_ssl": "Enable to verify the server's SSL certificate. Disable for self-signed certificates",
+                    "ssl_ca_path": "Path to a PEM-encoded CA certificate file on the HA host (e.g., /ssl/vsphere-ca.pem). Only needed with a private/internal CA"
                 },
                 "sections": {
                     "ssl_options": {
-                        "name": "SSL / Certificate Options",
-                        "description": "Configure SSL verification and custom CA certificates",
-                        "data": {
-                            "verify_ssl": "Verify SSL certificate",
-                            "ssl_ca_path": "CA certificate path"
-                        },
-                        "data_description": {
-                            "verify_ssl": "Enable to verify the server's SSL certificate. Disable for self-signed certificates",
-                            "ssl_ca_path": "Path to a PEM-encoded CA certificate file on the HA host (e.g., /ssl/vsphere-ca.pem). Only needed with a private/internal CA"
-                        }
+                        "name": "SSL / Certificate Options"
                     }
                 }
             },
             "categories": {
                 "title": "Monitoring Categories",
                 "description": "Select which vSphere objects and features to monitor.",
+                "data": {
+                    "hosts": "Hosts",
+                    "vms": "Virtual Machines",
+                    "datastores": "Datastores",
+                    "licenses": "Licenses",
+                    "clusters": "Clusters",
+                    "network": "Network",
+                    "resource_pools": "Resource Pools",
+                    "storage_advanced": "Advanced Storage",
+                    "performance": "Performance Metrics",
+                    "events_alarms": "Events & Alarms",
+                    "perf_interval": "Performance polling interval"
+                },
+                "data_description": {
+                    "hosts": "Monitor ESXi host CPU, memory, uptime, and power state",
+                    "vms": "Monitor virtual machine resources, snapshots, and guest info",
+                    "datastores": "Monitor storage capacity and usage",
+                    "licenses": "Track license status and expiration",
+                    "clusters": "Monitor DRS and HA cluster status",
+                    "network": "Monitor vSwitch, port group, and physical NIC status",
+                    "resource_pools": "Monitor resource pool CPU/memory reservations",
+                    "storage_advanced": "Per-VM disk and storage policy details",
+                    "performance": "Real-time CPU/memory/disk/network metrics (polled)",
+                    "events_alarms": "vSphere alarm tracking and HA event notifications",
+                    "perf_interval": "How often to poll performance metrics (seconds). Lower values increase API load"
+                },
                 "sections": {
                     "core_categories": {
-                        "name": "Core Monitoring",
-                        "description": "Primary vSphere objects to monitor",
-                        "data": {
-                            "hosts": "Hosts",
-                            "vms": "Virtual Machines",
-                            "datastores": "Datastores",
-                            "licenses": "Licenses"
-                        },
-                        "data_description": {
-                            "hosts": "Monitor ESXi host CPU, memory, uptime, and power state",
-                            "vms": "Monitor virtual machine resources, snapshots, and guest info",
-                            "datastores": "Monitor storage capacity and usage",
-                            "licenses": "Track license status and expiration"
-                        }
+                        "name": "Core Monitoring"
                     },
                     "advanced_categories": {
-                        "name": "Advanced Monitoring",
-                        "description": "Additional monitoring features (disabled by default)",
-                        "data": {
-                            "clusters": "Clusters",
-                            "network": "Network",
-                            "resource_pools": "Resource Pools",
-                            "storage_advanced": "Advanced Storage",
-                            "performance": "Performance Metrics",
-                            "events_alarms": "Events & Alarms",
-                            "perf_interval": "Performance polling interval"
-                        },
-                        "data_description": {
-                            "clusters": "Monitor DRS and HA cluster status",
-                            "network": "Monitor vSwitch, port group, and physical NIC status",
-                            "resource_pools": "Monitor resource pool CPU/memory reservations",
-                            "storage_advanced": "Per-VM disk and storage policy details",
-                            "performance": "Real-time CPU/memory/disk/network metrics (polled)",
-                            "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics (seconds). Lower values increase API load"
-                        }
+                        "name": "Advanced Monitoring"
                     }
                 }
             },
@@ -142,26 +131,21 @@
                     "host": "Host",
                     "port": "Port",
                     "username": "Username",
-                    "password": "Password"
+                    "password": "Password",
+                    "verify_ssl": "Verify SSL certificate",
+                    "ssl_ca_path": "CA certificate path"
                 },
                 "data_description": {
                     "host": "IP address or hostname of your vCenter or ESXi server",
                     "port": "Usually 443 for HTTPS connections",
                     "username": "For vCenter use user@domain.com format. For ESXi use local account name (e.g., root)",
-                    "password": "Your vSphere account password"
+                    "password": "Your vSphere account password",
+                    "verify_ssl": "Enable to verify the server's SSL certificate. Disable for self-signed certificates",
+                    "ssl_ca_path": "Path to a PEM-encoded CA certificate file on the HA host. Only needed with a private/internal CA"
                 },
                 "sections": {
                     "ssl_options": {
-                        "name": "SSL / Certificate Options",
-                        "description": "Configure SSL verification and custom CA certificates",
-                        "data": {
-                            "verify_ssl": "Verify SSL certificate",
-                            "ssl_ca_path": "CA certificate path"
-                        },
-                        "data_description": {
-                            "verify_ssl": "Enable to verify the server's SSL certificate. Disable for self-signed certificates",
-                            "ssl_ca_path": "Path to a PEM-encoded CA certificate file on the HA host. Only needed with a private/internal CA"
-                        }
+                        "name": "SSL / Certificate Options"
                     }
                 }
             }
@@ -181,44 +165,38 @@
             "init": {
                 "title": "vSphere Options",
                 "description": "Configure monitoring categories and intervals.",
+                "data": {
+                    "hosts": "Hosts",
+                    "vms": "Virtual Machines",
+                    "datastores": "Datastores",
+                    "licenses": "Licenses",
+                    "clusters": "Clusters",
+                    "network": "Network",
+                    "resource_pools": "Resource Pools",
+                    "storage_advanced": "Advanced Storage",
+                    "performance": "Performance Metrics",
+                    "events_alarms": "Events & Alarms",
+                    "perf_interval": "Performance polling interval"
+                },
+                "data_description": {
+                    "hosts": "Monitor ESXi host CPU, memory, uptime, and power state",
+                    "vms": "Monitor virtual machine resources, snapshots, and guest info",
+                    "datastores": "Monitor storage capacity and usage",
+                    "licenses": "Track license status and expiration",
+                    "clusters": "Monitor DRS and HA cluster status",
+                    "network": "Monitor vSwitch, port group, and physical NIC status",
+                    "resource_pools": "Monitor resource pool CPU/memory reservations",
+                    "storage_advanced": "Per-VM disk and storage policy details",
+                    "performance": "Real-time CPU/memory/disk/network metrics (polled)",
+                    "events_alarms": "vSphere alarm tracking and HA event notifications",
+                    "perf_interval": "How often to poll performance metrics (seconds). Lower values increase API load"
+                },
                 "sections": {
                     "core_categories": {
-                        "name": "Core Monitoring",
-                        "description": "Primary vSphere objects to monitor",
-                        "data": {
-                            "hosts": "Hosts",
-                            "vms": "Virtual Machines",
-                            "datastores": "Datastores",
-                            "licenses": "Licenses"
-                        },
-                        "data_description": {
-                            "hosts": "Monitor ESXi host CPU, memory, uptime, and power state",
-                            "vms": "Monitor virtual machine resources, snapshots, and guest info",
-                            "datastores": "Monitor storage capacity and usage",
-                            "licenses": "Track license status and expiration"
-                        }
+                        "name": "Core Monitoring"
                     },
                     "advanced_categories": {
-                        "name": "Advanced Monitoring",
-                        "description": "Additional monitoring features (disabled by default)",
-                        "data": {
-                            "clusters": "Clusters",
-                            "network": "Network",
-                            "resource_pools": "Resource Pools",
-                            "storage_advanced": "Advanced Storage",
-                            "performance": "Performance Metrics",
-                            "events_alarms": "Events & Alarms",
-                            "perf_interval": "Performance polling interval"
-                        },
-                        "data_description": {
-                            "clusters": "Monitor DRS and HA cluster status",
-                            "network": "Monitor vSwitch, port group, and physical NIC status",
-                            "resource_pools": "Monitor resource pool CPU/memory reservations",
-                            "storage_advanced": "Per-VM disk and storage policy details",
-                            "performance": "Real-time CPU/memory/disk/network metrics (polled)",
-                            "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics (seconds). Lower values increase API load"
-                        }
+                        "name": "Advanced Monitoring"
                     }
                 }
             },
