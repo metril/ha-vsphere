@@ -563,23 +563,16 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         current_restrictions: dict[str, Any] = current_options.get(CONF_RESTRICTIONS, {})
 
         if user_input is not None:
-            restrictions = {
-                "global": {
-                    "destructive": user_input.get("block_destructive", False),
-                    "snapshots": user_input.get("block_snapshots", False),
-                    "migrate": user_input.get("block_migrate", False),
-                    "host_ops": user_input.get("block_host_ops", False),
-                }
+            # Store global restrictions, preserve existing per-object restrictions
+            self._restrictions = dict(current_restrictions)
+            self._restrictions["global"] = {
+                "destructive": user_input.get("block_destructive", False),
+                "snapshots": user_input.get("block_snapshots", False),
+                "migrate": user_input.get("block_migrate", False),
+                "host_ops": user_input.get("block_host_ops", False),
             }
-            return self.async_create_entry(
-                data={
-                    **current_options,
-                    CONF_CATEGORIES: self._new_categories,
-                    CONF_PERF_INTERVAL: self._new_perf_interval,
-                    CONF_ENTITY_FILTER: self._entity_filter,
-                    CONF_RESTRICTIONS: restrictions,
-                }
-            )
+            # Move to per-object restrictions
+            return await self.async_step_object_restrictions()
 
         global_restrictions: dict[str, Any] = current_restrictions.get("global", {})
         data_schema = vol.Schema(
@@ -606,4 +599,115 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         return self.async_show_form(
             step_id="restrictions",
             data_schema=data_schema,
+        )
+
+    # ------------------------------------------------------------------
+    # Step 4: object_restrictions — per-host/VM action restrictions
+    # ------------------------------------------------------------------
+
+    async def async_step_object_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle per-object operation restrictions."""
+        current_options = dict(self.config_entry.options)
+
+        if user_input is not None:
+            # Parse selected objects and their blocked actions
+            obj_restrictions: dict[str, dict[str, dict[str, bool]]] = {
+                "vms": dict(self._restrictions.get("vms", {})),
+                "hosts": dict(self._restrictions.get("hosts", {})),
+            }
+
+            # Process VM restrictions
+            restricted_vms: list[str] = user_input.get("restricted_vms", [])
+            vm_blocked_actions: list[str] = user_input.get("vm_blocked_actions", [])
+            # Clear previous per-object VM restrictions, then set new ones
+            obj_restrictions["vms"] = {}
+            for vm_moref in restricted_vms:
+                obj_restrictions["vms"][vm_moref] = {action: True for action in vm_blocked_actions}
+
+            # Process host restrictions
+            restricted_hosts: list[str] = user_input.get("restricted_hosts", [])
+            host_blocked_actions: list[str] = user_input.get("host_blocked_actions", [])
+            obj_restrictions["hosts"] = {}
+            for host_moref in restricted_hosts:
+                obj_restrictions["hosts"][host_moref] = {action: True for action in host_blocked_actions}
+
+            self._restrictions.update(obj_restrictions)
+
+            return self.async_create_entry(
+                data={
+                    **current_options,
+                    CONF_CATEGORIES: self._new_categories,
+                    CONF_PERF_INTERVAL: self._new_perf_interval,
+                    CONF_ENTITY_FILTER: self._entity_filter,
+                    CONF_RESTRICTIONS: self._restrictions,
+                }
+            )
+
+        # Build VM and host options from inventory or coordinator data
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
+        coordinator = entry_data.get("coordinator")
+
+        vm_options: list[SelectOptionDict] = []
+        host_options: list[SelectOptionDict] = []
+        if coordinator and coordinator.data:
+            for moref, data in coordinator.data.get("vms", {}).items():
+                vm_options.append(SelectOptionDict(value=moref, label=data.get("name", moref)))
+            for moref, data in coordinator.data.get("hosts", {}).items():
+                host_options.append(SelectOptionDict(value=moref, label=data.get("name", moref)))
+
+        # Current per-object restrictions for defaults
+        current_restricted_vms = list(self._restrictions.get("vms", {}).keys())
+        current_restricted_hosts = list(self._restrictions.get("hosts", {}).keys())
+
+        # Determine currently blocked actions (use first restricted object as default)
+        current_vm_actions: list[str] = []
+        if current_restricted_vms:
+            first_vm = self._restrictions.get("vms", {}).get(current_restricted_vms[0], {})
+            current_vm_actions = [k for k, v in first_vm.items() if v and k != "_all"]
+
+        current_host_actions: list[str] = []
+        if current_restricted_hosts:
+            first_host = self._restrictions.get("hosts", {}).get(current_restricted_hosts[0], {})
+            current_host_actions = [k for k, v in first_host.items() if v and k != "_all"]
+
+        from .const import HostAction, VmAction
+
+        vm_action_options = [SelectOptionDict(value=a.value, label=a.value.replace("_", " ").title()) for a in VmAction]
+        host_action_options = [
+            SelectOptionDict(value=a.value, label=a.value.replace("_", " ").title()) for a in HostAction
+        ]
+
+        schema_fields: dict[Any, Any] = {}
+
+        if vm_options:
+            schema_fields[vol.Optional("restricted_vms", default=current_restricted_vms)] = SelectSelector(
+                SelectSelectorConfig(options=vm_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+            )
+            schema_fields[vol.Optional("vm_blocked_actions", default=current_vm_actions)] = SelectSelector(
+                SelectSelectorConfig(options=vm_action_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+            )
+
+        if host_options:
+            schema_fields[vol.Optional("restricted_hosts", default=current_restricted_hosts)] = SelectSelector(
+                SelectSelectorConfig(options=host_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+            )
+            schema_fields[vol.Optional("host_blocked_actions", default=current_host_actions)] = SelectSelector(
+                SelectSelectorConfig(options=host_action_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)
+            )
+
+        if not schema_fields:
+            # No hosts or VMs available — skip to save
+            return self.async_create_entry(
+                data={
+                    **current_options,
+                    CONF_CATEGORIES: self._new_categories,
+                    CONF_PERF_INTERVAL: self._new_perf_interval,
+                    CONF_ENTITY_FILTER: self._entity_filter,
+                    CONF_RESTRICTIONS: self._restrictions,
+                }
+            )
+
+        return self.async_show_form(
+            step_id="object_restrictions",
+            data_schema=vol.Schema(schema_fields),
         )

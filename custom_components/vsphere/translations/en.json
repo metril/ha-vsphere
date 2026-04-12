@@ -79,20 +79,43 @@
         "step": {
             "init": {
                 "title": "vSphere Options",
-                "description": "Configure monitoring categories and intervals."
+                "description": "Configure monitoring categories and intervals.",
+                "data": {
+                    "hosts": "Hosts",
+                    "vms": "Virtual Machines",
+                    "datastores": "Datastores",
+                    "licenses": "Licenses",
+                    "clusters": "Clusters",
+                    "network": "Network",
+                    "resource_pools": "Resource Pools",
+                    "storage_advanced": "Advanced Storage",
+                    "performance": "Performance Metrics",
+                    "events_alarms": "Events & Alarms",
+                    "perf_interval": "Performance polling interval (seconds)"
+                }
             },
             "entity_selection": {
                 "title": "{category} Selection",
                 "description": "Choose which {category} to monitor. Toggle 'Monitor all' to automatically include newly added objects, or disable it to pick specific ones."
             },
             "restrictions": {
-                "title": "Operation Restrictions",
-                "description": "Block categories of operations globally.",
+                "title": "Global Operation Restrictions",
+                "description": "Block categories of operations across all hosts and VMs.",
                 "data": {
                     "block_destructive": "Block destructive operations (power off, shutdown, reset, remove snapshots)",
                     "block_snapshots": "Block all snapshot operations",
                     "block_migrate": "Block VM migration",
                     "block_host_ops": "Block all host operations"
+                }
+            },
+            "object_restrictions": {
+                "title": "Per-Object Restrictions",
+                "description": "Block specific actions on individual hosts or VMs. Select the objects to restrict, then choose which actions to block on them.",
+                "data": {
+                    "restricted_vms": "VMs to restrict",
+                    "vm_blocked_actions": "Actions to block on selected VMs",
+                    "restricted_hosts": "Hosts to restrict",
+                    "host_blocked_actions": "Actions to block on selected hosts"
                 }
             }
         }
