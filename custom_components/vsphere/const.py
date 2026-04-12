@@ -16,6 +16,7 @@ CONF_PORT: Final = "port"
 CONF_USERNAME: Final = "username"
 CONF_PASSWORD: Final = "password"
 CONF_VERIFY_SSL: Final = "verify_ssl"
+CONF_SSL_CA_PATH: Final = "ssl_ca_path"
 
 # Config entry options keys
 CONF_CATEGORIES: Final = "categories"

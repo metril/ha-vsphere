@@ -15,6 +15,7 @@ from .const import (
     CONF_PASSWORD,
     CONF_PORT,
     CONF_RESTRICTIONS,
+    CONF_SSL_CA_PATH,
     CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_CATEGORIES,
@@ -54,6 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         username=entry.data[CONF_USERNAME],
         password=entry.data[CONF_PASSWORD],
         verify_ssl=entry.data[CONF_VERIFY_SSL],
+        ssl_ca_path=entry.data.get(CONF_SSL_CA_PATH, ""),
     )
 
     try:

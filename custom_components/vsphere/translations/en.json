@@ -3,13 +3,14 @@
         "step": {
             "user": {
                 "title": "vSphere Connection",
-                "description": "Enter your vCenter or ESXi host credentials.",
+                "description": "Enter your vCenter or ESXi host credentials. For vCenter, use user@domain format. For ESXi, use the local account name.",
                 "data": {
                     "host": "Host",
                     "port": "Port",
                     "username": "Username",
                     "password": "Password",
-                    "verify_ssl": "Verify SSL certificate"
+                    "verify_ssl": "Verify SSL certificate",
+                    "ssl_ca_path": "CA certificate path (optional, e.g. /ssl/vsphere-ca.pem)"
                 }
             },
             "categories": {
@@ -59,13 +60,15 @@
                     "port": "Port",
                     "username": "Username",
                     "password": "Password",
-                    "verify_ssl": "Verify SSL certificate"
+                    "verify_ssl": "Verify SSL certificate",
+                    "ssl_ca_path": "CA certificate path (optional, e.g. /ssl/vsphere-ca.pem)"
                 }
             }
         },
         "error": {
             "cannot_connect": "Cannot connect to vSphere host",
             "invalid_auth": "Invalid username or password",
+            "ca_not_found": "CA certificate file not found at the specified path",
             "unknown": "An unexpected error occurred"
         },
         "abort": {

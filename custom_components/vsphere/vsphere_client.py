@@ -42,13 +42,21 @@ class VSphereClient:
         username: str,
         password: str,
         verify_ssl: bool,
+        ssl_ca_path: str = "",
     ) -> None:
-        """Initialize VSphereClient."""
+        """Initialize VSphereClient.
+
+        Args:
+            ssl_ca_path: Optional path to a custom CA certificate file (PEM).
+                         Used when verify_ssl is True and the server uses a
+                         certificate signed by a private/internal CA.
+        """
         self._host = host
         self._port = port
         self._username = username
         self._password = password
         self._verify_ssl = verify_ssl
+        self._ssl_ca_path = ssl_ca_path
 
         self._push_conn: Any = None
         self._poll_conn: Any = None
@@ -64,6 +72,10 @@ class VSphereClient:
             ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
+        elif self._ssl_ca_path:
+            # Custom CA — verify against the provided certificate file
+            ssl_context = ssl.create_default_context(cafile=self._ssl_ca_path)
+            _LOGGER.debug("Using custom CA certificate: %s", self._ssl_ca_path)
 
         try:
             conn = SmartConnect(
@@ -214,8 +226,7 @@ class VSphereClient:
             privileges: dict[str, bool] = {}
             if len(result) != len(privs_to_check):
                 _LOGGER.warning(
-                    "Privilege check returned %d results for %d queries; "
-                    "unmatched privileges will be assumed granted",
+                    "Privilege check returned %d results for %d queries; unmatched privileges will be assumed granted",
                     len(result),
                     len(privs_to_check),
                 )

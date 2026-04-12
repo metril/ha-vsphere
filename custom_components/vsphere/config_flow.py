@@ -35,6 +35,7 @@ from .const import (
     CONF_PORT,
     CONF_PRIVILEGES,
     CONF_RESTRICTIONS,
+    CONF_SSL_CA_PATH,
     CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_CATEGORIES,
@@ -79,6 +80,9 @@ def _connection_schema(
             ),
             vol.Required(CONF_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
             vol.Required(CONF_VERIFY_SSL, default=d.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)): BooleanSelector(),
+            vol.Optional(CONF_SSL_CA_PATH, default=d.get(CONF_SSL_CA_PATH, "")): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.TEXT)
+            ),
         }
     )
 
@@ -350,12 +354,21 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def _test_connection(self, data: dict[str, Any]) -> dict[str, str]:
         """Test vSphere connection and check privileges; return error dict (empty on success)."""
+        # Validate CA file path if provided
+        ca_path = data.get(CONF_SSL_CA_PATH, "")
+        if ca_path:
+            from pathlib import Path  # noqa: PLC0415
+
+            if not Path(ca_path).is_file():
+                return {"base": "ca_not_found"}
+
         client = VSphereClient(
             host=data[CONF_HOST],
             port=data[CONF_PORT],
             username=data[CONF_USERNAME],
             password=data[CONF_PASSWORD],
             verify_ssl=data[CONF_VERIFY_SSL],
+            ssl_ca_path=data.get(CONF_SSL_CA_PATH, ""),
         )
         try:
             await self.hass.async_add_executor_job(client.test_connection)
