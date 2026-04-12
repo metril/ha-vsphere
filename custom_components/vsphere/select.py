@@ -42,9 +42,8 @@ async def async_setup_entry(
     if categories.get("hosts"):
         for moref, host_data in coordinator.data.get("hosts", {}).items():
             name: str = host_data.get("name", moref)
-            allowed = resolver.allowed_actions("hosts", moref)
             policies: list[dict[str, Any]] = host_data.get("available_power_policies", [])
-            if HostAction.POWER_POLICY in allowed and policies:
+            if policies:
                 entities.append(
                     HostPowerPolicySelect(
                         coordinator=coordinator,

@@ -48,34 +48,30 @@ async def async_setup_entry(
     if categories.get("vms"):
         for moref, vm_data in coordinator.data.get("vms", {}).items():
             name: str = vm_data.get("name", moref)
-            allowed = resolver.allowed_actions("vms", moref)
-            if VmAction.POWER_ON in allowed or VmAction.POWER_OFF in allowed:
-                entities.append(
-                    VmPowerSwitch(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
+            entities.append(
+                VmPowerSwitch(
+                    coordinator=coordinator,
+                    entry=entry,
+                    moref=moref,
+                    name=name,
+                    client=client,
+                    resolver=resolver,
                 )
+            )
 
     if categories.get("hosts"):
         for moref, host_data in coordinator.data.get("hosts", {}).items():
             name = host_data.get("name", moref)
-            allowed = resolver.allowed_actions("hosts", moref)
-            if HostAction.MAINTENANCE in allowed:
-                entities.append(
-                    HostMaintenanceSwitch(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
+            entities.append(
+                HostMaintenanceSwitch(
+                    coordinator=coordinator,
+                    entry=entry,
+                    moref=moref,
+                    name=name,
+                    client=client,
+                    resolver=resolver,
                 )
+            )
 
     async_add_entities(entities)
 

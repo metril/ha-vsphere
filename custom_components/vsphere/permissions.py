@@ -1,5 +1,9 @@
 """Permission resolver for vSphere Control integration.
 
+Enforces user-configured operation restrictions.  vSphere account privileges
+are NOT checked here — they are enforced by vCenter/ESXi at operation time,
+which surfaces a clear ``NoPermission`` fault when access is denied.
+
 Resolution chain (most specific wins):
   1. restrictions.{category}["{moref}"].{action}   → per-object per-action
   2. restrictions.{category}["{moref}"]._all        → per-object blanket
@@ -16,7 +20,6 @@ from __future__ import annotations
 from typing import Any
 
 from .const import (
-    ACTION_PRIVILEGE_MAP,
     DESTRUCTIVE_ACTIONS,
     HOST_OPS_ACTIONS,
     RESTRICTION_GROUP_DESTRUCTIVE,
@@ -59,18 +62,13 @@ class PermissionResolver:
     def __init__(
         self,
         restrictions: dict[str, Any],
-        privileges: dict[str, dict[str, bool]] | None = None,
     ) -> None:
-        """Store the restrictions configuration and vSphere account privileges.
+        """Store the user-configured operation restrictions.
 
         Args:
             restrictions: User-configured operation restrictions.
-            privileges: Per-object privilege map from check_privileges().
-                        Keyed by moref, each value is {privilege_id: bool}.
-                        If None or empty, all privileges are assumed granted.
         """
         self._restrictions = restrictions
-        self._privileges = privileges or {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -115,19 +113,6 @@ class PermissionResolver:
         ``blocked`` is True when the action is denied.
         ``reason`` is a human-readable description of the deciding rule.
         """
-        # ------------------------------------------------------------------
-        # Step 0: vSphere account privilege check (per-object)
-        # ------------------------------------------------------------------
-        if self._privileges:
-            obj_privs = self._privileges.get(moref, {})
-            if obj_privs:
-                required_priv = ACTION_PRIVILEGE_MAP.get(action)
-                if required_priv and not obj_privs.get(required_priv, True):
-                    return True, (
-                        f"{action} is blocked on {moref} because the vSphere account "
-                        f"lacks the '{required_priv}' privilege on this object"
-                    )
-
         obj_rules: dict[str, Any] = self._restrictions.get(category, {}).get(moref, {})
         cat_restrictions: dict[str, Any] = self._restrictions.get("categories", {}).get(category, {})
         global_rules: dict[str, Any] = self._restrictions.get("global", {})

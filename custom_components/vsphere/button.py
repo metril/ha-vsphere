@@ -50,83 +50,30 @@ async def async_setup_entry(
     if categories.get("hosts"):
         for moref, host_data in coordinator.data.get("hosts", {}).items():
             name: str = host_data.get("name", moref)
-            allowed = resolver.allowed_actions("hosts", moref)
-            if HostAction.REBOOT in allowed:
-                entities.append(
-                    HostRebootButton(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
+            entities.append(
+                HostRebootButton(
+                    coordinator=coordinator,
+                    entry=entry,
+                    moref=moref,
+                    name=name,
+                    client=client,
+                    resolver=resolver,
                 )
+            )
 
     if categories.get("vms"):
         for moref, vm_data in coordinator.data.get("vms", {}).items():
             name = vm_data.get("name", moref)
-            allowed = resolver.allowed_actions("vms", moref)
-
-            if VmAction.REBOOT in allowed:
+            for button_cls in (
+                VmRebootButton,
+                VmResetButton,
+                VmSnapshotCreateButton,
+                VmSnapshotRemoveAllButton,
+                VmSnapshotRemoveFirstButton,
+                VmSnapshotRemoveLastButton,
+            ):
                 entities.append(
-                    VmRebootButton(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
-                )
-
-            if VmAction.RESET in allowed:
-                entities.append(
-                    VmResetButton(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
-                )
-
-            if VmAction.SNAPSHOT_CREATE in allowed:
-                entities.append(
-                    VmSnapshotCreateButton(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
-                )
-
-            if VmAction.SNAPSHOT_REMOVE in allowed:
-                entities.append(
-                    VmSnapshotRemoveAllButton(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
-                )
-                entities.append(
-                    VmSnapshotRemoveFirstButton(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
-                )
-                entities.append(
-                    VmSnapshotRemoveLastButton(
+                    button_cls(
                         coordinator=coordinator,
                         entry=entry,
                         moref=moref,

@@ -7,11 +7,11 @@ Home Assistant custom integration for VMware vSphere monitoring and control.
 
 ```
 custom_components/vsphere/
-├── __init__.py          (209)  Entry setup/teardown, privilege refresh
-├── const.py             (180)  Constants, enums, privilege mappings
+├── __init__.py          (196)  Entry setup/teardown
+├── const.py             (143)  Constants, enums
 ├── exceptions.py         (19)  VSphereError hierarchy
-├── permissions.py       (200)  9-step resolution chain + privilege enforcement
-├── vsphere_client.py  (1,591)  ALL pyVmomi interaction (only file importing pyVmomi)
+├── permissions.py       (180)  7-step resolution chain (user restrictions only)
+├── vsphere_client.py  (1,510)  ALL pyVmomi interaction (only file importing pyVmomi)
 ├── coordinator.py       (153)  VSphereData (push) + VSpherePerfCoordinator (poll)
 ├── event_listener.py    (572)  PropertyCollector push thread + translation maps
 ├── entity.py            (182)  Base entity + child entity + device hierarchy
@@ -21,7 +21,7 @@ custom_components/vsphere/
 ├── switch.py            (189)  VM power + host maintenance mode
 ├── button.py            (373)  7 button classes with press-time permission checks
 ├── select.py            (114)  Host power policy selector
-├── services.py          (432)  9 service handlers with device resolution
+├── services.py          (410)  8 service handlers with device resolution
 ├── diagnostics.py        (29)  Credential redaction
 ├── services.yaml               Service definitions for HA
 ├── manifest.json               Integration metadata
@@ -30,7 +30,7 @@ custom_components/vsphere/
 ```
 
 - `docs/superpowers/` — Design specs and plans (local only, gitignored)
-- `tests/` — 47 unit tests (permission resolver + privilege enforcement)
+- `tests/` — 40 unit tests (permission resolver)
 
 ## Development
 
@@ -92,9 +92,12 @@ Root (vCenter/ESXi)
 └── Resource Pool
 ```
 
-## Permission System (9-step chain)
+## Permission System (7-step chain)
 
-0. vSphere account privilege check
+vSphere account privileges are NOT pre-checked — vCenter/ESXi enforces them at
+operation time and returns `NoPermission` faults with the exact missing privilege.
+The resolver handles only user-configured restrictions:
+
 1. Per-object per-action
 2. Per-object blanket (_all)
 3. Per-category per-action
@@ -107,4 +110,4 @@ Root (vCenter/ESXi)
 ## Dependencies
 
 - `pyvmomi>=8.0.3` — VMware vSphere API SDK
-- Home Assistant Core 2024.1.0+
+- Home Assistant Core 2024.6.0+

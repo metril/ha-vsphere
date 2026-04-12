@@ -176,86 +176,6 @@ class VSphereClient:
         finally:
             self._disconnect(conn)
 
-    def check_privileges(self) -> dict[str, dict[str, bool]]:
-        """Check per-object vSphere privileges for all hosts and VMs.
-
-        Returns a dict keyed by moref, each containing a privilege ID → bool map.
-        Checks privileges on each actual managed object (not root folder) because
-        accounts with per-object/folder permissions may lack root-level privileges.
-        """
-        from .const import (
-            PRIV_HOST_MAINTENANCE,
-            PRIV_HOST_POWER,
-            PRIV_HOST_POWER_MGMT,
-            PRIV_VM_MIGRATE,
-            PRIV_VM_POWER_OFF,
-            PRIV_VM_POWER_ON,
-            PRIV_VM_RESET,
-            PRIV_VM_SNAPSHOT_CREATE,
-            PRIV_VM_SNAPSHOT_REMOVE,
-            PRIV_VM_SUSPEND,
-        )
-
-        vm_privs = [
-            PRIV_VM_POWER_ON,
-            PRIV_VM_POWER_OFF,
-            PRIV_VM_RESET,
-            PRIV_VM_SUSPEND,
-            PRIV_VM_SNAPSHOT_CREATE,
-            PRIV_VM_SNAPSHOT_REMOVE,
-            PRIV_VM_MIGRATE,
-        ]
-        host_privs = [PRIV_HOST_POWER, PRIV_HOST_MAINTENANCE, PRIV_HOST_POWER_MGMT]
-
-        conn = self._connect()
-        try:
-            content = conn.RetrieveContent()
-            auth_mgr = content.authorizationManager
-            session_id = content.sessionManager.currentSession.key
-            result: dict[str, dict[str, bool]] = {}
-
-            # Check VM privileges per VM
-            vm_view = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
-            try:
-                for vm_obj in vm_view.view:
-                    moref = str(vm_obj._moId)  # noqa: SLF001
-                    try:
-                        priv_result = auth_mgr.HasPrivilegeOnEntity(
-                            entity=vm_obj,
-                            sessionId=session_id,
-                            privId=vm_privs,
-                        )
-                        result[moref] = {pid: bool(val) for pid, val in zip(vm_privs, priv_result, strict=False)}
-                    except Exception:  # noqa: BLE001
-                        result[moref] = {p: True for p in vm_privs}
-            finally:
-                vm_view.Destroy()
-
-            # Check host privileges per host
-            host_view = content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)
-            try:
-                for host_obj in host_view.view:
-                    moref = str(host_obj._moId)  # noqa: SLF001
-                    try:
-                        priv_result = auth_mgr.HasPrivilegeOnEntity(
-                            entity=host_obj,
-                            sessionId=session_id,
-                            privId=host_privs,
-                        )
-                        result[moref] = {pid: bool(val) for pid, val in zip(host_privs, priv_result, strict=False)}
-                    except Exception:  # noqa: BLE001
-                        result[moref] = {p: True for p in host_privs}
-            finally:
-                host_view.Destroy()
-
-            _LOGGER.debug("Per-object privileges checked for %d objects", len(result))
-            return result
-        except Exception:
-            _LOGGER.debug("Failed to check privileges, assuming full access", exc_info=True)
-            return {}
-        finally:
-            self._disconnect(conn)
-
     # ------------------------------------------------------------------
     # Data fetching helpers
     # ------------------------------------------------------------------
@@ -1008,6 +928,11 @@ class VSphereClient:
             raise VSphereOperationError(f"Invalid state for VM {vm_moref}: {exc}") from exc
         except vim.fault.ResourceInUse as exc:
             raise VSphereOperationError(f"Resource in use for VM {vm_moref}: {exc}") from exc
+        except vim.fault.NoPermission as exc:
+            priv = getattr(exc, "privilegeId", "unknown")
+            raise VSphereOperationError(
+                f"Permission denied for {action} on VM {vm_moref}: missing vSphere privilege '{priv}'"
+            ) from exc
         except vmodl.MethodFault as exc:
             raise VSphereOperationError(f"vSphere fault during {action} on VM {vm_moref}: {exc}") from exc
 
@@ -1041,6 +966,11 @@ class VSphereClient:
             raise VSphereOperationError(f"Task in progress for VM {vm_moref}: {exc}") from exc
         except vim.fault.InsufficientResourcesFault as exc:
             raise VSphereOperationError(f"Insufficient resources for snapshot on VM {vm_moref}: {exc}") from exc
+        except vim.fault.NoPermission as exc:
+            priv = getattr(exc, "privilegeId", "unknown")
+            raise VSphereOperationError(
+                f"Permission denied for create_snapshot on VM {vm_moref}: missing vSphere privilege '{priv}'"
+            ) from exc
         except vmodl.MethodFault as exc:
             raise VSphereOperationError(f"vSphere fault during create_snapshot on VM {vm_moref}: {exc}") from exc
 
@@ -1091,6 +1021,11 @@ class VSphereClient:
             raise VSphereOperationError(f"Snapshot fault for VM {vm_moref}: {exc}") from exc
         except vim.fault.TaskInProgress as exc:
             raise VSphereOperationError(f"Task in progress for VM {vm_moref}: {exc}") from exc
+        except vim.fault.NoPermission as exc:
+            priv = getattr(exc, "privilegeId", "unknown")
+            raise VSphereOperationError(
+                f"Permission denied for remove_snapshot on VM {vm_moref}: missing vSphere privilege '{priv}'"
+            ) from exc
         except vmodl.MethodFault as exc:
             raise VSphereOperationError(f"vSphere fault during remove_snapshot on VM {vm_moref}: {exc}") from exc
 
@@ -1118,6 +1053,11 @@ class VSphereClient:
             raise VSphereOperationError(f"Cannot migrate {vm_name} to {host_name}: {err.msg}") from err
         except vim.fault.InsufficientResourcesFault as err:
             raise VSphereOperationError(f"Insufficient resources on {host_name}: {err.msg}") from err
+        except vim.fault.NoPermission as exc:
+            priv = getattr(exc, "privilegeId", "unknown")
+            raise VSphereOperationError(
+                f"Permission denied for migrate on VM {vm_moref}: missing vSphere privilege '{priv}'"
+            ) from exc
         except vmodl.MethodFault as err:
             raise VSphereOperationError(f"vSphere error during migration of {vm_name}: {err.msg}") from err
 
@@ -1160,6 +1100,11 @@ class VSphereClient:
             raise VSphereOperationError(f"Invalid state for host {host_moref}: {exc}") from exc
         except vim.fault.TaskInProgress as exc:
             raise VSphereOperationError(f"Task in progress for host {host_moref}: {exc}") from exc
+        except vim.fault.NoPermission as exc:
+            priv = getattr(exc, "privilegeId", "unknown")
+            raise VSphereOperationError(
+                f"Permission denied for {action} on host {host_moref}: missing vSphere privilege '{priv}'"
+            ) from exc
         except vmodl.MethodFault as exc:
             raise VSphereOperationError(f"vSphere fault during host_{action} on {host_moref}: {exc}") from exc
 
@@ -1182,6 +1127,11 @@ class VSphereClient:
 
         except VSphereOperationError:
             raise
+        except vim.fault.NoPermission as exc:
+            priv = getattr(exc, "privilegeId", "unknown")
+            raise VSphereOperationError(
+                f"Permission denied for power policy change on host {host_moref}: missing vSphere privilege '{priv}'"
+            ) from exc
         except vmodl.MethodFault as exc:
             raise VSphereOperationError(f"vSphere fault setting power policy on {host_moref}: {exc}") from exc
 
@@ -1204,6 +1154,11 @@ class VSphereClient:
             raise VSphereOperationError(f"Invalid state for host {host_moref}: {exc}") from exc
         except vim.fault.TaskInProgress as exc:
             raise VSphereOperationError(f"Task in progress for host {host_moref}: {exc}") from exc
+        except vim.fault.NoPermission as exc:
+            priv = getattr(exc, "privilegeId", "unknown")
+            raise VSphereOperationError(
+                f"Permission denied for maintenance mode on host {host_moref}: missing vSphere privilege '{priv}'"
+            ) from exc
         except vmodl.MethodFault as exc:
             raise VSphereOperationError(f"vSphere fault setting maintenance mode on {host_moref}: {exc}") from exc
 

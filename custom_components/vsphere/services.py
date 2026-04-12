@@ -11,7 +11,6 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
-    CONF_PRIVILEGES,
     DOMAIN,
     SNAP_ALL,
     SNAP_FIRST,
@@ -33,7 +32,6 @@ SVC_REMOVE_SNAPSHOT = "remove_snapshot"
 SVC_LIST_HOSTS = "list_hosts"
 SVC_LIST_POWER_POLICIES = "list_power_policies"
 SVC_VM_MIGRATE = "vm_migrate"
-SVC_REFRESH_PRIVILEGES = "refresh_privileges"
 
 # Field names
 ATTR_DEVICE_ID = "device_id"
@@ -330,28 +328,6 @@ async def _handle_vm_migrate(call: ServiceCall) -> None:
         raise HomeAssistantError(str(err)) from err
 
 
-async def _handle_refresh_privileges(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Re-check vSphere privileges for all objects and reload the integration."""
-    client, _, entry_id, _ = _resolve_device(hass, call.data["device_id"])
-
-    try:
-        new_privileges = await hass.async_add_executor_job(client.check_privileges)
-    except Exception as err:
-        raise HomeAssistantError(f"Privilege check failed: {err}") from err
-
-    # Update stored privileges in entry options
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None:
-        raise HomeAssistantError(f"Config entry {entry_id} not found")
-
-    new_options = dict(entry.options)
-    new_options[CONF_PRIVILEGES] = new_privileges
-    hass.config_entries.async_update_entry(entry, options=new_options)
-
-    # Reload the integration to apply new privileges
-    await hass.config_entries.async_reload(entry_id)
-
-
 # ---------------------------------------------------------------------------
 # Registration / unregistration
 # ---------------------------------------------------------------------------
@@ -434,14 +410,6 @@ async def async_register_services(hass: HomeAssistant) -> None:
             schema=_SCHEMA_VM_MIGRATE,
         )
 
-    if not hass.services.has_service(DOMAIN, SVC_REFRESH_PRIVILEGES):
-        hass.services.async_register(
-            DOMAIN,
-            SVC_REFRESH_PRIVILEGES,
-            lambda call: _handle_refresh_privileges(hass, call),
-            schema=_SCHEMA_LIST_HOSTS,  # same schema: just device_id
-        )
-
     _LOGGER.debug("vSphere services registered")
 
 
@@ -457,7 +425,6 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SVC_LIST_HOSTS,
         SVC_LIST_POWER_POLICIES,
         SVC_VM_MIGRATE,
-        SVC_REFRESH_PRIVILEGES,
     ):
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)

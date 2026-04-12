@@ -14,7 +14,6 @@ from .const import (
     CONF_HOST,
     CONF_PASSWORD,
     CONF_PORT,
-    CONF_PRIVILEGES,
     CONF_RESTRICTIONS,
     CONF_SSL_CA_PATH,
     CONF_USERNAME,
@@ -85,11 +84,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(str(err)) from err
 
     # ------------------------------------------------------------------
-    # Create permission resolver (privileges loaded from stored options, refreshed via service)
+    # Create permission resolver (user-configured restrictions only;
+    # vSphere account privileges are enforced by vCenter/ESXi at operation time)
     # ------------------------------------------------------------------
     restrictions: dict[str, Any] = entry.options.get(CONF_RESTRICTIONS, {})
-    privileges: dict[str, dict[str, bool]] = entry.options.get(CONF_PRIVILEGES, {})
-    resolver = PermissionResolver(restrictions, privileges)
+    resolver = PermissionResolver(restrictions)
 
     # ------------------------------------------------------------------
     # Create data coordinator

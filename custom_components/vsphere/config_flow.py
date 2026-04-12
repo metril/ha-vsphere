@@ -15,9 +15,7 @@ from homeassistant.config_entries import (
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
     BooleanSelector,
-    NumberSelector,
-    NumberSelectorConfig,
-    NumberSelectorMode,
+    DurationSelector,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -34,7 +32,6 @@ from .const import (
     CONF_PASSWORD,
     CONF_PERF_INTERVAL,
     CONF_PORT,
-    CONF_PRIVILEGES,
     CONF_RESTRICTIONS,
     CONF_SSL_CA_PATH,
     CONF_USERNAME,
@@ -52,6 +49,12 @@ from .const import (
 )
 from .exceptions import VSphereAuthError, VSphereConnectionError
 from .vsphere_client import VSphereClient
+
+
+def _seconds_to_duration(seconds: int) -> dict[str, int]:
+    """Convert seconds to a duration dict for DurationSelector."""
+    return {"hours": seconds // 3600, "minutes": (seconds % 3600) // 60, "seconds": seconds % 60}
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -143,15 +146,7 @@ def _categories_schema(
         vol.Required(cat.value, default=effective.get(cat.value, False)): BooleanSelector()
         for cat in _ADVANCED_CATEGORIES
     }
-    advanced_fields[vol.Required(CONF_PERF_INTERVAL, default=perf_interval)] = NumberSelector(
-        NumberSelectorConfig(
-            min=MIN_PERF_INTERVAL,
-            max=MAX_PERF_INTERVAL,
-            step=30,
-            mode=NumberSelectorMode.SLIDER,
-            unit_of_measurement="seconds",
-        )
-    )
+    advanced_fields[vol.Required(CONF_PERF_INTERVAL, default=_seconds_to_duration(perf_interval))] = DurationSelector()
     advanced_schema = vol.Schema(advanced_fields)
 
     return vol.Schema(
@@ -202,7 +197,17 @@ def _flatten_category_sections(user_input: dict[str, Any]) -> tuple[dict[str, bo
     advanced = user_input.pop("advanced_categories", {})
     merged = {**core, **advanced}
     categories = {cat.value: merged.get(cat.value, False) for cat in Category}
-    perf_interval = int(merged.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL))
+    raw_interval = merged.get(CONF_PERF_INTERVAL, {})
+    if isinstance(raw_interval, dict):
+        # DurationSelector returns {"hours": h, "minutes": m, "seconds": s}
+        perf_interval = (
+            int(raw_interval.get("hours", 0)) * 3600
+            + int(raw_interval.get("minutes", 0)) * 60
+            + int(raw_interval.get("seconds", 0))
+        )
+    else:
+        perf_interval = int(raw_interval)
+    perf_interval = max(MIN_PERF_INTERVAL, min(MAX_PERF_INTERVAL, perf_interval))
     return categories, perf_interval
 
 
@@ -219,7 +224,6 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         self._inventory: dict[str, dict[str, Any]] = {}
         self._filterable_remaining: list[Category] = []
         self._current_filter_category: Category | None = None
-        self._privileges: dict[str, bool] = {}
         self._restrictions: dict[str, Any] = {}
         self._perf_interval: int = DEFAULT_PERF_INTERVAL
 
@@ -603,8 +607,6 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         existing_data = dict(reconfigure_entry.data)
 
         if user_input is not None:
-            refresh_privs = user_input.pop("refresh_privileges", False)
-
             # Flatten SSL section into a copy (preserve original for form re-render)
             flat_input = dict(user_input)
             _flatten_ssl_section(flat_input)
@@ -615,39 +617,14 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(new_unique_id)
                 self._abort_if_unique_id_configured(updates={**existing_data, **flat_input})
 
-                # Refresh privileges if requested
-                if refresh_privs:
-                    client = VSphereClient(
-                        host=flat_input[CONF_HOST],
-                        port=flat_input[CONF_PORT],
-                        username=flat_input[CONF_USERNAME],
-                        password=flat_input[CONF_PASSWORD],
-                        verify_ssl=flat_input[CONF_VERIFY_SSL],
-                        ssl_ca_path=flat_input.get(CONF_SSL_CA_PATH, ""),
-                    )
-                    try:
-                        new_privs = await self.hass.async_add_executor_job(client.check_privileges)
-                    except Exception:  # noqa: BLE001
-                        _LOGGER.warning("Privilege refresh failed, keeping existing privileges")
-                        new_privs = reconfigure_entry.options.get(CONF_PRIVILEGES, {})
-
-                    new_options = dict(reconfigure_entry.options)
-                    new_options[CONF_PRIVILEGES] = new_privs
-                    self.hass.config_entries.async_update_entry(reconfigure_entry, options=new_options)
-
                 return self.async_update_reload_and_abort(
                     reconfigure_entry,
                     data={**existing_data, **flat_input},
                 )
 
-        # Build schema with refresh_privileges toggle added
-        conn_schema = _connection_schema(existing_data)
-        fields: dict[Any, Any] = dict(conn_schema.schema)
-        fields[vol.Required("refresh_privileges", default=False)] = BooleanSelector()
-
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema(fields),
+            data_schema=_connection_schema(existing_data),
             errors=errors,
         )
 
@@ -692,13 +669,6 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             _LOGGER.exception("Unexpected error testing vSphere connection")
             return {"base": "unknown"}
 
-        # Check account privileges
-        try:
-            self._privileges = await self.hass.async_add_executor_job(client.check_privileges)
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("Privilege check failed, assuming full access")
-            self._privileges = {}
-
         return {}
 
     def _create_entry(self) -> ConfigFlowResult:
@@ -710,7 +680,6 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_ENTITY_FILTER: self._entity_filter,
             CONF_RESTRICTIONS: self._restrictions,
             CONF_PERF_INTERVAL: self._perf_interval,
-            CONF_PRIVILEGES: self._privileges,
         }
 
         return self.async_create_entry(
