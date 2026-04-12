@@ -90,7 +90,7 @@ HOST_SENSORS: tuple[VSphereSensorDescription, ...] = (
     VSphereSensorDescription(
         key="vm_count",
         translation_key="vm_count",
-        name="VM Count",
+        name="Running VMs",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("vm_count"),
     ),
@@ -333,7 +333,7 @@ CLUSTER_SENSORS: tuple[VSphereSensorDescription, ...] = (
     VSphereSensorDescription(
         key="vm_count",
         translation_key="vm_count",
-        name="VM Count",
+        name="Cluster VMs",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("vm_count"),
     ),
@@ -427,7 +427,7 @@ RESOURCE_POOL_SENSORS: tuple[VSphereSensorDescription, ...] = (
     VSphereSensorDescription(
         key="vm_count",
         translation_key="vm_count",
-        name="VM Count",
+        name="Pool VMs",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("vm_count"),
     ),
@@ -633,12 +633,27 @@ async def async_setup_entry(
 
     entities: list[VSphereSensor | VSpherePerfSensor | VSphereAlarmSensor] = []
 
+    # When performance monitoring is enabled, skip static sensors that are
+    # superseded by their realtime counterparts from the PerformanceManager.
+    perf_enabled = bool(categories.get("performance"))
+    _perf_skip: dict[str, set[str]] = (
+        {
+            "hosts": {"cpu_usage_ghz", "mem_usage_gb"},
+            "vms": {"cpu_use_pct", "memory_active_mb"},
+        }
+        if perf_enabled
+        else {}
+    )
+
     for category, (descriptions, data_key) in SENSOR_MAP.items():
         if not categories.get(category):
             continue
+        skip_keys = _perf_skip.get(data_key, set())
         for moref, obj_data in coordinator.data.get(data_key, {}).items():
             name: str = obj_data.get("name", moref)
             for description in descriptions:
+                if description.key in skip_keys:
+                    continue
                 entities.append(
                     VSphereSensor(
                         coordinator=coordinator,
