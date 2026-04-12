@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any
 
@@ -226,6 +227,8 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         self._current_filter_category: Category | None = None
         self._restrictions: dict[str, Any] = {}
         self._perf_interval: int = DEFAULT_PERF_INTERVAL
+        self._current_vm_moref: str | None = None
+        self._current_host_moref: str | None = None
 
     # ------------------------------------------------------------------
     # Step 1: user -- connection details
@@ -374,7 +377,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         """Ask whether to configure operation restrictions during initial setup."""
         if user_input is not None:
             if user_input.get("configure_restrictions"):
-                return await self.async_step_restrictions()
+                return await self.async_step_restrictions_menu()
             return self._create_entry()
 
         return self.async_show_form(
@@ -387,7 +390,22 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # ------------------------------------------------------------------
-    # Step 5: restrictions -- global restriction shortcuts
+    # Restrictions menu
+    # ------------------------------------------------------------------
+
+    async def async_step_restrictions_menu(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Show the restrictions sub-menu."""
+        return self.async_show_menu(
+            step_id="restrictions_menu",
+            menu_options=["restrictions", "vm_select", "host_select", "restrictions_done"],
+        )
+
+    async def async_step_restrictions_done(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Finish restrictions and create the config entry."""
+        return self._create_entry()
+
+    # ------------------------------------------------------------------
+    # Global restrictions
     # ------------------------------------------------------------------
 
     async def async_step_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -399,7 +417,7 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
                 "migrate": user_input.get("block_migrate", False),
                 "host_ops": user_input.get("block_host_ops", False),
             }
-            return await self.async_step_vm_restrictions_toggle()
+            return await self.async_step_restrictions_menu()
 
         return self.async_show_form(
             step_id="restrictions",
@@ -407,12 +425,12 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # ------------------------------------------------------------------
-    # Step 6a: vm_restrictions_toggle -- ask whether to configure VM restrictions
+    # Per-VM restrictions (select → actions → another loop)
     # ------------------------------------------------------------------
 
-    async def async_step_vm_restrictions_toggle(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask whether to configure per-VM restrictions."""
-        vm_options: list[SelectOptionDict] = sorted(
+    def _vm_options(self) -> list[SelectOptionDict]:
+        """Return sorted VM options from inventory."""
+        return sorted(
             [
                 SelectOptionDict(value=moref, label=info.get("name", moref))
                 for moref, info in self._inventory.items()
@@ -421,141 +439,159 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
             key=lambda x: x["label"],
         )
 
-        # Skip if no VMs in inventory
-        if not vm_options:
-            return await self.async_step_host_restrictions_toggle()
+    def _host_options(self) -> list[SelectOptionDict]:
+        """Return sorted host options from inventory."""
+        return sorted(
+            [
+                SelectOptionDict(value=moref, label=info.get("name", moref))
+                for moref, info in self._inventory.items()
+                if info.get("type") == "host"
+            ],
+            key=lambda x: x["label"],
+        )
+
+    def _obj_name(self, moref: str) -> str:
+        """Get the display name for a moref from inventory."""
+        return self._inventory.get(moref, {}).get("name", moref)
+
+    async def async_step_vm_select(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Select a single VM to configure restrictions for."""
+        vm_opts = self._vm_options()
+        if not vm_opts:
+            return await self.async_step_restrictions_menu()
 
         if user_input is not None:
-            if user_input.get("configure_vm_restrictions"):
-                return await self.async_step_vm_restrictions()
-            return await self.async_step_host_restrictions_toggle()
+            self._current_vm_moref = user_input["vm_to_restrict"]
+            return await self.async_step_vm_actions()
 
         return self.async_show_form(
-            step_id="vm_restrictions_toggle",
+            step_id="vm_select",
             data_schema=vol.Schema(
                 {
-                    vol.Required("configure_vm_restrictions", default=False): BooleanSelector(),
+                    vol.Required("vm_to_restrict"): SelectSelector(
+                        SelectSelectorConfig(options=vm_opts, multiple=False, mode=SelectSelectorMode.DROPDOWN)
+                    ),
                 }
             ),
         )
 
-    # ------------------------------------------------------------------
-    # Step 6b: vm_restrictions -- per-VM action restrictions
-    # ------------------------------------------------------------------
-
-    async def async_step_vm_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle per-VM operation restrictions."""
+    async def async_step_vm_actions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Select which actions to block on the chosen VM."""
         from .const import VmAction  # noqa: PLC0415
 
-        if user_input is not None:
-            vm_restrictions: dict[str, dict[str, bool]] = {}
-            for vm_moref in user_input.get("restricted_vms", []):
-                vm_restrictions[vm_moref] = {a: True for a in user_input.get("vm_blocked_actions", [])}
-            self._restrictions["vms"] = vm_restrictions
-            return await self.async_step_host_restrictions_toggle()
+        moref = self._current_vm_moref or ""
+        name = self._obj_name(moref)
 
-        vm_options: list[SelectOptionDict] = sorted(
-            [
-                SelectOptionDict(value=moref, label=info.get("name", moref))
-                for moref, info in self._inventory.items()
-                if info.get("type") == "vm"
-            ],
-            key=lambda x: x["label"],
-        )
+        if user_input is not None:
+            actions = user_input.get("vm_blocked_actions", [])
+            if actions:
+                self._restrictions.setdefault("vms", {})[moref] = {a: True for a in actions}
+            else:
+                self._restrictions.get("vms", {}).pop(moref, None)
+            self._current_vm_moref = None
+            return await self.async_step_vm_another()
+
+        current_actions = [k for k, v in self._restrictions.get("vms", {}).get(moref, {}).items() if v and k != "_all"]
         vm_action_options: list[SelectOptionDict] = sorted(
             [SelectOptionDict(value=a.value, label=a.value.replace("_", " ").title()) for a in VmAction],
             key=lambda x: x["label"],
         )
-        current_restricted_vms = list(self._restrictions.get("vms", {}).keys())
 
         return self.async_show_form(
-            step_id="vm_restrictions",
+            step_id="vm_actions",
             data_schema=vol.Schema(
                 {
-                    vol.Optional("restricted_vms", default=current_restricted_vms): SelectSelector(
-                        SelectSelectorConfig(options=vm_options, multiple=True, mode=SelectSelectorMode.LIST)
-                    ),
-                    vol.Optional("vm_blocked_actions", default=[]): SelectSelector(
+                    vol.Optional("vm_blocked_actions", default=current_actions): SelectSelector(
                         SelectSelectorConfig(options=vm_action_options, multiple=True, mode=SelectSelectorMode.LIST)
                     ),
                 }
             ),
+            description_placeholders={"vm_name": name},
         )
 
-    # ------------------------------------------------------------------
-    # Step 7a: host_restrictions_toggle -- ask whether to configure host restrictions
-    # ------------------------------------------------------------------
-
-    async def async_step_host_restrictions_toggle(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask whether to configure per-host restrictions."""
-        host_options: list[SelectOptionDict] = sorted(
-            [
-                SelectOptionDict(value=moref, label=info.get("name", moref))
-                for moref, info in self._inventory.items()
-                if info.get("type") == "host"
-            ],
-            key=lambda x: x["label"],
-        )
-
-        # Skip if no hosts in inventory
-        if not host_options:
-            return self._create_entry()
-
+    async def async_step_vm_another(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask whether to edit restrictions on another VM."""
         if user_input is not None:
-            if user_input.get("configure_host_restrictions"):
-                return await self.async_step_host_restrictions()
-            return self._create_entry()
+            if user_input.get("restrict_another_vm"):
+                return await self.async_step_vm_select()
+            return await self.async_step_restrictions_menu()
 
         return self.async_show_form(
-            step_id="host_restrictions_toggle",
+            step_id="vm_another",
+            data_schema=vol.Schema({vol.Required("restrict_another_vm", default=False): BooleanSelector()}),
+        )
+
+    # ------------------------------------------------------------------
+    # Per-host restrictions (select → actions → another loop)
+    # ------------------------------------------------------------------
+
+    async def async_step_host_select(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Select a single host to configure restrictions for."""
+        host_opts = self._host_options()
+        if not host_opts:
+            return await self.async_step_restrictions_menu()
+
+        if user_input is not None:
+            self._current_host_moref = user_input["host_to_restrict"]
+            return await self.async_step_host_actions()
+
+        return self.async_show_form(
+            step_id="host_select",
             data_schema=vol.Schema(
                 {
-                    vol.Required("configure_host_restrictions", default=False): BooleanSelector(),
+                    vol.Required("host_to_restrict"): SelectSelector(
+                        SelectSelectorConfig(options=host_opts, multiple=False, mode=SelectSelectorMode.DROPDOWN)
+                    ),
                 }
             ),
         )
 
-    # ------------------------------------------------------------------
-    # Step 7b: host_restrictions -- per-host action restrictions
-    # ------------------------------------------------------------------
-
-    async def async_step_host_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle per-host operation restrictions."""
+    async def async_step_host_actions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Select which actions to block on the chosen host."""
         from .const import HostAction  # noqa: PLC0415
 
-        if user_input is not None:
-            host_restrictions: dict[str, dict[str, bool]] = {}
-            for host_moref in user_input.get("restricted_hosts", []):
-                host_restrictions[host_moref] = {a: True for a in user_input.get("host_blocked_actions", [])}
-            self._restrictions["hosts"] = host_restrictions
-            return self._create_entry()
+        moref = self._current_host_moref or ""
+        name = self._obj_name(moref)
 
-        host_options: list[SelectOptionDict] = sorted(
-            [
-                SelectOptionDict(value=moref, label=info.get("name", moref))
-                for moref, info in self._inventory.items()
-                if info.get("type") == "host"
-            ],
-            key=lambda x: x["label"],
-        )
+        if user_input is not None:
+            actions = user_input.get("host_blocked_actions", [])
+            if actions:
+                self._restrictions.setdefault("hosts", {})[moref] = {a: True for a in actions}
+            else:
+                self._restrictions.get("hosts", {}).pop(moref, None)
+            self._current_host_moref = None
+            return await self.async_step_host_another()
+
+        current_actions = [
+            k for k, v in self._restrictions.get("hosts", {}).get(moref, {}).items() if v and k != "_all"
+        ]
         host_action_options: list[SelectOptionDict] = sorted(
             [SelectOptionDict(value=a.value, label=a.value.replace("_", " ").title()) for a in HostAction],
             key=lambda x: x["label"],
         )
-        current_restricted_hosts = list(self._restrictions.get("hosts", {}).keys())
 
         return self.async_show_form(
-            step_id="host_restrictions",
+            step_id="host_actions",
             data_schema=vol.Schema(
                 {
-                    vol.Optional("restricted_hosts", default=current_restricted_hosts): SelectSelector(
-                        SelectSelectorConfig(options=host_options, multiple=True, mode=SelectSelectorMode.LIST)
-                    ),
-                    vol.Optional("host_blocked_actions", default=[]): SelectSelector(
+                    vol.Optional("host_blocked_actions", default=current_actions): SelectSelector(
                         SelectSelectorConfig(options=host_action_options, multiple=True, mode=SelectSelectorMode.LIST)
                     ),
                 }
             ),
+            description_placeholders={"host_name": name},
+        )
+
+    async def async_step_host_another(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask whether to edit restrictions on another host."""
+        if user_input is not None:
+            if user_input.get("restrict_another_host"):
+                return await self.async_step_host_select()
+            return await self.async_step_restrictions_menu()
+
+        return self.async_show_form(
+            step_id="host_another",
+            data_schema=vol.Schema({vol.Required("restrict_another_host", default=False): BooleanSelector()}),
         )
 
     # ------------------------------------------------------------------
@@ -690,68 +726,106 @@ class VSphereConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
-    """Options flow for vSphere Control."""
+    """Menu-driven options flow for vSphere Control."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize the options flow."""
+        """Initialize the options flow — load all current options upfront."""
         super().__init__(config_entry)
-        self._new_categories: dict[str, bool] = {}
-        self._new_perf_interval: int = DEFAULT_PERF_INTERVAL
+        current = dict(config_entry.options)
+        self._new_categories: dict[str, bool] = dict(current.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
+        self._new_perf_interval: int = current.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)
+        self._entity_filter: dict[str, Any] = dict(current.get(CONF_ENTITY_FILTER, {}))
+        self._restrictions: dict[str, Any] = copy.deepcopy(current.get(CONF_RESTRICTIONS, {}))
         self._inventory: dict[str, dict[str, Any]] = {}
+        self._inventory_loaded: bool = False
         self._filterable_remaining: list[Category] = []
         self._current_filter_category: Category | None = None
-        self._entity_filter: dict[str, Any] = {}
-        self._restrictions: dict[str, Any] = {}
+        self._current_vm_moref: str | None = None
+        self._current_host_moref: str | None = None
 
-    # ------------------------------------------------------------------
-    # Step 1: init -- category toggles (sectioned) + perf interval
-    # ------------------------------------------------------------------
-
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle the options flow entry point."""
-        current_options = dict(self.config_entry.options)
-        current_categories: dict[str, bool] = current_options.get(CONF_CATEGORIES, dict(DEFAULT_CATEGORIES))
-        current_perf_interval: int = current_options.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)
-
-        if user_input is not None:
-            self._new_categories, self._new_perf_interval = _flatten_category_sections(user_input)
-            # Preserve existing entity filter, will be updated in entity_selection step
-            self._entity_filter = dict(current_options.get(CONF_ENTITY_FILTER, {}))
-            return await self._start_entity_selection()
-
-        return self.async_show_form(
-            step_id="init",
-            data_schema=_categories_schema(current_categories, current_perf_interval),
-        )
-
-    # ------------------------------------------------------------------
-    # Step 2: entity_selection -- per-category object selection
-    # ------------------------------------------------------------------
-
-    async def _start_entity_selection(self) -> ConfigFlowResult:
-        """Enumerate inventory and start per-category entity selection."""
+    async def _ensure_inventory(self) -> None:
+        """Load inventory once (lazy, shared across all menu sections)."""
+        if self._inventory_loaded:
+            return
         entry_data: dict[str, Any] = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
         client = entry_data.get("client")
         if client is not None:
             try:
                 self._inventory = await self.hass.async_add_executor_job(client.enumerate_inventory)
             except Exception:  # noqa: BLE001
-                _LOGGER.debug("Could not enumerate inventory in options flow; skipping entity selection")
+                _LOGGER.debug("Could not enumerate inventory in options flow")
                 self._inventory = {}
-        else:
-            self._inventory = {}
+        self._inventory_loaded = True
 
-        # Only iterate categories that are newly enabled
+    def _vm_options(self) -> list[SelectOptionDict]:
+        """Return sorted VM options from inventory."""
+        return sorted(
+            [
+                SelectOptionDict(value=moref, label=info.get("name", moref))
+                for moref, info in self._inventory.items()
+                if info.get("type") == "vm"
+            ],
+            key=lambda x: x["label"],
+        )
+
+    def _host_options(self) -> list[SelectOptionDict]:
+        """Return sorted host options from inventory."""
+        return sorted(
+            [
+                SelectOptionDict(value=moref, label=info.get("name", moref))
+                for moref, info in self._inventory.items()
+                if info.get("type") == "host"
+            ],
+            key=lambda x: x["label"],
+        )
+
+    def _obj_name(self, moref: str) -> str:
+        """Get the display name for a moref from inventory."""
+        info = self._inventory.get(moref, {})
+        return info.get("name", moref)
+
+    # ------------------------------------------------------------------
+    # Main menu
+    # ------------------------------------------------------------------
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Show the top-level options menu."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["categories", "entity_selection_start", "restrictions_menu", "save"],
+        )
+
+    # ------------------------------------------------------------------
+    # Categories
+    # ------------------------------------------------------------------
+
+    async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle monitoring category selection."""
+        if user_input is not None:
+            self._new_categories, self._new_perf_interval = _flatten_category_sections(user_input)
+            return await self.async_step_init()
+
+        return self.async_show_form(
+            step_id="categories",
+            data_schema=_categories_schema(self._new_categories, self._new_perf_interval),
+        )
+
+    # ------------------------------------------------------------------
+    # Entity selection
+    # ------------------------------------------------------------------
+
+    async def async_step_entity_selection_start(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Kick off entity selection — enumerate inventory, then loop categories."""
+        await self._ensure_inventory()
         self._filterable_remaining = [
             cat for cat in _FILTERABLE_CATEGORIES if self._new_categories.get(cat.value, False)
         ]
         return await self._next_entity_selection_step()
 
     async def _next_entity_selection_step(self) -> ConfigFlowResult:
-        """Advance to the next filterable category, or move to restrictions."""
+        """Advance to the next filterable category, or return to menu."""
         if not self._filterable_remaining:
-            return await self.async_step_restrictions()
-
+            return await self.async_step_init()
         self._current_filter_category = self._filterable_remaining.pop(0)
         return await self.async_step_entity_selection()
 
@@ -759,7 +833,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         """Handle entity selection for the current filterable category."""
         category = self._current_filter_category
         if category is None:
-            return await self.async_step_restrictions()
+            return await self.async_step_init()
 
         if user_input is not None:
             selected: list[str] = user_input.get("selected_objects", [])
@@ -788,243 +862,213 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
             ],
             key=lambda x: x["label"],
         )
-
-        # Determine existing defaults for this category
         existing_filter = self._entity_filter.get(category.value, {})
         default_selected = existing_filter.get("morefs", [])
 
-        data_schema = vol.Schema(
-            {
-                vol.Optional("selected_objects", default=default_selected): SelectSelector(
-                    SelectSelectorConfig(
-                        options=options,
-                        multiple=True,
-                        mode=SelectSelectorMode.LIST,
-                    )
-                ),
-            }
-        )
-
         return self.async_show_form(
             step_id="entity_selection",
-            data_schema=data_schema,
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("selected_objects", default=default_selected): SelectSelector(
+                        SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.LIST)
+                    ),
+                }
+            ),
             description_placeholders={"category": _CATEGORY_DISPLAY_NAMES.get(category, category.value)},
         )
 
     # ------------------------------------------------------------------
-    # Step 3: restrictions -- global restriction shortcuts
+    # Restrictions menu
+    # ------------------------------------------------------------------
+
+    async def async_step_restrictions_menu(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Show the restrictions sub-menu."""
+        await self._ensure_inventory()
+        return self.async_show_menu(
+            step_id="restrictions_menu",
+            menu_options=["restrictions", "vm_select", "host_select", "init"],
+        )
+
+    # ------------------------------------------------------------------
+    # Global restrictions
     # ------------------------------------------------------------------
 
     async def async_step_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle global operation restriction shortcuts."""
-        current_options = dict(self.config_entry.options)
-        current_restrictions: dict[str, Any] = current_options.get(CONF_RESTRICTIONS, {})
-
         if user_input is not None:
-            # Store global restrictions, preserve existing per-object restrictions
-            self._restrictions = dict(current_restrictions)
             self._restrictions["global"] = {
                 "destructive": user_input.get("block_destructive", False),
                 "snapshots": user_input.get("block_snapshots", False),
                 "migrate": user_input.get("block_migrate", False),
                 "host_ops": user_input.get("block_host_ops", False),
             }
-            # Move to per-VM restrictions toggle
-            return await self.async_step_vm_restrictions_toggle()
+            return await self.async_step_restrictions_menu()
 
         return self.async_show_form(
             step_id="restrictions",
-            data_schema=_restrictions_schema(current_restrictions),
+            data_schema=_restrictions_schema(self._restrictions),
         )
 
     # ------------------------------------------------------------------
-    # Step 4a: vm_restrictions_toggle -- ask whether to configure VM restrictions
+    # Per-VM restrictions (select → actions → another loop)
     # ------------------------------------------------------------------
 
-    async def async_step_vm_restrictions_toggle(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask whether to configure per-VM restrictions."""
-        vm_options: list[SelectOptionDict] = sorted(
-            [
-                SelectOptionDict(value=moref, label=info.get("name", moref))
-                for moref, info in self._inventory.items()
-                if info.get("type") == "vm"
-            ],
-            key=lambda x: x["label"],
-        )
-
-        # Skip if no VMs in inventory
-        if not vm_options:
-            return await self.async_step_host_restrictions_toggle()
+    async def async_step_vm_select(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Select a single VM to configure restrictions for."""
+        await self._ensure_inventory()
+        vm_opts = self._vm_options()
+        if not vm_opts:
+            return await self.async_step_restrictions_menu()
 
         if user_input is not None:
-            if user_input.get("configure_vm_restrictions"):
-                return await self.async_step_vm_restrictions()
-            return await self.async_step_host_restrictions_toggle()
+            self._current_vm_moref = user_input["vm_to_restrict"]
+            return await self.async_step_vm_actions()
 
         return self.async_show_form(
-            step_id="vm_restrictions_toggle",
+            step_id="vm_select",
             data_schema=vol.Schema(
                 {
-                    vol.Required("configure_vm_restrictions", default=False): BooleanSelector(),
+                    vol.Required("vm_to_restrict"): SelectSelector(
+                        SelectSelectorConfig(options=vm_opts, multiple=False, mode=SelectSelectorMode.DROPDOWN)
+                    ),
                 }
             ),
         )
 
-    # ------------------------------------------------------------------
-    # Step 4b: vm_restrictions -- per-VM action restrictions
-    # ------------------------------------------------------------------
-
-    async def async_step_vm_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle per-VM operation restrictions."""
+    async def async_step_vm_actions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Select which actions to block on the chosen VM."""
         from .const import VmAction  # noqa: PLC0415
 
-        if user_input is not None:
-            vm_restrictions: dict[str, dict[str, bool]] = {}
-            for vm_moref in user_input.get("restricted_vms", []):
-                vm_restrictions[vm_moref] = {a: True for a in user_input.get("vm_blocked_actions", [])}
-            self._restrictions["vms"] = vm_restrictions
-            return await self.async_step_host_restrictions_toggle()
+        moref = self._current_vm_moref or ""
+        name = self._obj_name(moref)
 
-        vm_options: list[SelectOptionDict] = sorted(
-            [
-                SelectOptionDict(value=moref, label=info.get("name", moref))
-                for moref, info in self._inventory.items()
-                if info.get("type") == "vm"
-            ],
-            key=lambda x: x["label"],
-        )
+        if user_input is not None:
+            actions = user_input.get("vm_blocked_actions", [])
+            if actions:
+                self._restrictions.setdefault("vms", {})[moref] = {a: True for a in actions}
+            else:
+                self._restrictions.get("vms", {}).pop(moref, None)
+            self._current_vm_moref = None
+            return await self.async_step_vm_another()
+
+        # Pre-populate with existing restrictions for this VM
+        current_actions = [k for k, v in self._restrictions.get("vms", {}).get(moref, {}).items() if v and k != "_all"]
         vm_action_options: list[SelectOptionDict] = sorted(
             [SelectOptionDict(value=a.value, label=a.value.replace("_", " ").title()) for a in VmAction],
             key=lambda x: x["label"],
         )
-        current_restricted_vms = list(self._restrictions.get("vms", {}).keys())
-
-        # Determine currently blocked actions (use first restricted object as default)
-        current_vm_actions: list[str] = []
-        if current_restricted_vms:
-            first_vm = self._restrictions.get("vms", {}).get(current_restricted_vms[0], {})
-            current_vm_actions = [k for k, v in first_vm.items() if v and k != "_all"]
 
         return self.async_show_form(
-            step_id="vm_restrictions",
+            step_id="vm_actions",
             data_schema=vol.Schema(
                 {
-                    vol.Optional("restricted_vms", default=current_restricted_vms): SelectSelector(
-                        SelectSelectorConfig(options=vm_options, multiple=True, mode=SelectSelectorMode.LIST)
-                    ),
-                    vol.Optional("vm_blocked_actions", default=current_vm_actions): SelectSelector(
+                    vol.Optional("vm_blocked_actions", default=current_actions): SelectSelector(
                         SelectSelectorConfig(options=vm_action_options, multiple=True, mode=SelectSelectorMode.LIST)
                     ),
                 }
             ),
+            description_placeholders={"vm_name": name},
         )
 
-    # ------------------------------------------------------------------
-    # Step 5a: host_restrictions_toggle -- ask whether to configure host restrictions
-    # ------------------------------------------------------------------
-
-    async def async_step_host_restrictions_toggle(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask whether to configure per-host restrictions."""
-        current_options = dict(self.config_entry.options)
-
-        host_options: list[SelectOptionDict] = sorted(
-            [
-                SelectOptionDict(value=moref, label=info.get("name", moref))
-                for moref, info in self._inventory.items()
-                if info.get("type") == "host"
-            ],
-            key=lambda x: x["label"],
-        )
-
-        # Skip if no hosts in inventory
-        if not host_options:
-            return self.async_create_entry(
-                data={
-                    **current_options,
-                    CONF_CATEGORIES: self._new_categories,
-                    CONF_PERF_INTERVAL: self._new_perf_interval,
-                    CONF_ENTITY_FILTER: self._entity_filter,
-                    CONF_RESTRICTIONS: self._restrictions,
-                }
-            )
-
+    async def async_step_vm_another(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask whether to edit restrictions on another VM."""
         if user_input is not None:
-            if user_input.get("configure_host_restrictions"):
-                return await self.async_step_host_restrictions()
-            return self.async_create_entry(
-                data={
-                    **current_options,
-                    CONF_CATEGORIES: self._new_categories,
-                    CONF_PERF_INTERVAL: self._new_perf_interval,
-                    CONF_ENTITY_FILTER: self._entity_filter,
-                    CONF_RESTRICTIONS: self._restrictions,
-                }
-            )
+            if user_input.get("restrict_another_vm"):
+                return await self.async_step_vm_select()
+            return await self.async_step_restrictions_menu()
 
         return self.async_show_form(
-            step_id="host_restrictions_toggle",
+            step_id="vm_another",
+            data_schema=vol.Schema({vol.Required("restrict_another_vm", default=False): BooleanSelector()}),
+        )
+
+    # ------------------------------------------------------------------
+    # Per-host restrictions (select → actions → another loop)
+    # ------------------------------------------------------------------
+
+    async def async_step_host_select(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Select a single host to configure restrictions for."""
+        await self._ensure_inventory()
+        host_opts = self._host_options()
+        if not host_opts:
+            return await self.async_step_restrictions_menu()
+
+        if user_input is not None:
+            self._current_host_moref = user_input["host_to_restrict"]
+            return await self.async_step_host_actions()
+
+        return self.async_show_form(
+            step_id="host_select",
             data_schema=vol.Schema(
                 {
-                    vol.Required("configure_host_restrictions", default=False): BooleanSelector(),
+                    vol.Required("host_to_restrict"): SelectSelector(
+                        SelectSelectorConfig(options=host_opts, multiple=False, mode=SelectSelectorMode.DROPDOWN)
+                    ),
                 }
             ),
         )
 
-    # ------------------------------------------------------------------
-    # Step 5b: host_restrictions -- per-host action restrictions
-    # ------------------------------------------------------------------
-
-    async def async_step_host_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle per-host operation restrictions."""
+    async def async_step_host_actions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Select which actions to block on the chosen host."""
         from .const import HostAction  # noqa: PLC0415
 
-        current_options = dict(self.config_entry.options)
+        moref = self._current_host_moref or ""
+        name = self._obj_name(moref)
 
         if user_input is not None:
-            host_restrictions: dict[str, dict[str, bool]] = {}
-            for host_moref in user_input.get("restricted_hosts", []):
-                host_restrictions[host_moref] = {a: True for a in user_input.get("host_blocked_actions", [])}
-            self._restrictions["hosts"] = host_restrictions
-            return self.async_create_entry(
-                data={
-                    **current_options,
-                    CONF_CATEGORIES: self._new_categories,
-                    CONF_PERF_INTERVAL: self._new_perf_interval,
-                    CONF_ENTITY_FILTER: self._entity_filter,
-                    CONF_RESTRICTIONS: self._restrictions,
-                }
-            )
+            actions = user_input.get("host_blocked_actions", [])
+            if actions:
+                self._restrictions.setdefault("hosts", {})[moref] = {a: True for a in actions}
+            else:
+                self._restrictions.get("hosts", {}).pop(moref, None)
+            self._current_host_moref = None
+            return await self.async_step_host_another()
 
-        host_options: list[SelectOptionDict] = sorted(
-            [
-                SelectOptionDict(value=moref, label=info.get("name", moref))
-                for moref, info in self._inventory.items()
-                if info.get("type") == "host"
-            ],
-            key=lambda x: x["label"],
-        )
+        # Pre-populate with existing restrictions for this host
+        current_actions = [
+            k for k, v in self._restrictions.get("hosts", {}).get(moref, {}).items() if v and k != "_all"
+        ]
         host_action_options: list[SelectOptionDict] = sorted(
             [SelectOptionDict(value=a.value, label=a.value.replace("_", " ").title()) for a in HostAction],
             key=lambda x: x["label"],
         )
-        current_restricted_hosts = list(self._restrictions.get("hosts", {}).keys())
-
-        # Determine currently blocked actions (use first restricted object as default)
-        current_host_actions: list[str] = []
-        if current_restricted_hosts:
-            first_host = self._restrictions.get("hosts", {}).get(current_restricted_hosts[0], {})
-            current_host_actions = [k for k, v in first_host.items() if v and k != "_all"]
 
         return self.async_show_form(
-            step_id="host_restrictions",
+            step_id="host_actions",
             data_schema=vol.Schema(
                 {
-                    vol.Optional("restricted_hosts", default=current_restricted_hosts): SelectSelector(
-                        SelectSelectorConfig(options=host_options, multiple=True, mode=SelectSelectorMode.LIST)
-                    ),
-                    vol.Optional("host_blocked_actions", default=current_host_actions): SelectSelector(
+                    vol.Optional("host_blocked_actions", default=current_actions): SelectSelector(
                         SelectSelectorConfig(options=host_action_options, multiple=True, mode=SelectSelectorMode.LIST)
                     ),
                 }
             ),
+            description_placeholders={"host_name": name},
+        )
+
+    async def async_step_host_another(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask whether to edit restrictions on another host."""
+        if user_input is not None:
+            if user_input.get("restrict_another_host"):
+                return await self.async_step_host_select()
+            return await self.async_step_restrictions_menu()
+
+        return self.async_show_form(
+            step_id="host_another",
+            data_schema=vol.Schema({vol.Required("restrict_another_host", default=False): BooleanSelector()}),
+        )
+
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
+
+    async def async_step_save(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Save all options and finish."""
+        return self.async_create_entry(
+            data={
+                **dict(self.config_entry.options),
+                CONF_CATEGORIES: self._new_categories,
+                CONF_PERF_INTERVAL: self._new_perf_interval,
+                CONF_ENTITY_FILTER: self._entity_filter,
+                CONF_RESTRICTIONS: self._restrictions,
+            }
         )
