@@ -176,17 +176,17 @@ class VSphereClient:
         finally:
             self._disconnect(conn)
 
-    def check_privileges(self) -> dict[str, bool]:
-        """Check which vSphere privileges the current session has.
+    def check_privileges(self) -> dict[str, dict[str, bool]]:
+        """Check per-object vSphere privileges for all hosts and VMs.
 
-        Returns a dict mapping privilege ID strings to booleans.
-        Checks against the root folder so results apply globally.
+        Returns a dict keyed by moref, each containing a privilege ID → bool map.
+        Checks privileges on each actual managed object (not root folder) because
+        accounts with per-object/folder permissions may lack root-level privileges.
         """
         from .const import (
             PRIV_HOST_MAINTENANCE,
             PRIV_HOST_POWER,
             PRIV_HOST_POWER_MGMT,
-            PRIV_SYSTEM_READ,
             PRIV_VM_MIGRATE,
             PRIV_VM_POWER_OFF,
             PRIV_VM_POWER_ON,
@@ -196,8 +196,7 @@ class VSphereClient:
             PRIV_VM_SUSPEND,
         )
 
-        privs_to_check = [
-            PRIV_SYSTEM_READ,
+        vm_privs = [
             PRIV_VM_POWER_ON,
             PRIV_VM_POWER_OFF,
             PRIV_VM_RESET,
@@ -205,39 +204,55 @@ class VSphereClient:
             PRIV_VM_SNAPSHOT_CREATE,
             PRIV_VM_SNAPSHOT_REMOVE,
             PRIV_VM_MIGRATE,
-            PRIV_HOST_POWER,
-            PRIV_HOST_MAINTENANCE,
-            PRIV_HOST_POWER_MGMT,
         ]
+        host_privs = [PRIV_HOST_POWER, PRIV_HOST_MAINTENANCE, PRIV_HOST_POWER_MGMT]
 
         conn = self._connect()
         try:
             content = conn.RetrieveContent()
             auth_mgr = content.authorizationManager
             session_id = content.sessionManager.currentSession.key
+            result: dict[str, dict[str, bool]] = {}
 
-            result = auth_mgr.HasPrivilegeOnEntity(
-                entity=content.rootFolder,
-                sessionId=session_id,
-                privId=privs_to_check,
-            )
+            # Check VM privileges per VM
+            vm_view = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
+            try:
+                for vm_obj in vm_view.view:
+                    moref = str(vm_obj._moId)  # noqa: SLF001
+                    try:
+                        priv_result = auth_mgr.HasPrivilegeOnEntity(
+                            entity=vm_obj,
+                            sessionId=session_id,
+                            privId=vm_privs,
+                        )
+                        result[moref] = {pid: bool(val) for pid, val in zip(vm_privs, priv_result, strict=False)}
+                    except Exception:  # noqa: BLE001
+                        result[moref] = {p: True for p in vm_privs}
+            finally:
+                vm_view.Destroy()
 
-            # result is a list of bools matching privs_to_check order
-            privileges: dict[str, bool] = {}
-            if len(result) != len(privs_to_check):
-                _LOGGER.warning(
-                    "Privilege check returned %d results for %d queries; unmatched privileges will be assumed granted",
-                    len(result),
-                    len(privs_to_check),
-                )
-            for priv_id, has_priv in zip(privs_to_check, result, strict=False):
-                privileges[priv_id] = bool(has_priv)
+            # Check host privileges per host
+            host_view = content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)
+            try:
+                for host_obj in host_view.view:
+                    moref = str(host_obj._moId)  # noqa: SLF001
+                    try:
+                        priv_result = auth_mgr.HasPrivilegeOnEntity(
+                            entity=host_obj,
+                            sessionId=session_id,
+                            privId=host_privs,
+                        )
+                        result[moref] = {pid: bool(val) for pid, val in zip(host_privs, priv_result, strict=False)}
+                    except Exception:  # noqa: BLE001
+                        result[moref] = {p: True for p in host_privs}
+            finally:
+                host_view.Destroy()
 
-            _LOGGER.debug("vSphere privileges: %s", privileges)
-            return privileges
+            _LOGGER.debug("Per-object privileges checked for %d objects", len(result))
+            return result
         except Exception:
             _LOGGER.debug("Failed to check privileges, assuming full access", exc_info=True)
-            return {p: True for p in privs_to_check}
+            return {}
         finally:
             self._disconnect(conn)
 

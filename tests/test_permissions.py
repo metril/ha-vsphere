@@ -340,7 +340,7 @@ class TestExplain:
 
 
 class TestVSpherePrivileges:
-    """Test vSphere account privilege enforcement (step 0 in resolution chain)."""
+    """Test per-object vSphere account privilege enforcement (step 0 in resolution chain)."""
 
     def test_no_privileges_allows_everything(self):
         resolver = PermissionResolver({})
@@ -351,7 +351,7 @@ class TestVSpherePrivileges:
         assert resolver.is_allowed("vms", "vm-1", "power_on") is True
 
     def test_missing_privilege_blocks_action(self):
-        privileges = {PRIV_VM_POWER_ON: False, PRIV_VM_POWER_OFF: True}
+        privileges = {"vm-1": {PRIV_VM_POWER_ON: False, PRIV_VM_POWER_OFF: True}}
         resolver = PermissionResolver({}, privileges=privileges)
         assert resolver.is_allowed("vms", "vm-1", "power_on") is False
         assert resolver.is_allowed("vms", "vm-1", "power_off") is True
@@ -359,18 +359,30 @@ class TestVSpherePrivileges:
     def test_privilege_check_before_user_restrictions(self):
         """Even if user allows the action, missing privilege blocks it."""
         restrictions = {"vms": {"vm-1": {"power_on": False}}}  # explicitly allowed
-        privileges = {PRIV_VM_POWER_ON: False}
+        privileges = {"vm-1": {PRIV_VM_POWER_ON: False}}
         resolver = PermissionResolver(restrictions, privileges=privileges)
         assert resolver.is_allowed("vms", "vm-1", "power_on") is False
 
     def test_privilege_blocks_host_action(self):
-        privileges = {PRIV_HOST_POWER: False}
+        privileges = {"host-42": {PRIV_HOST_POWER: False}}
         resolver = PermissionResolver({}, privileges=privileges)
         assert resolver.is_allowed("hosts", "host-42", "shutdown") is False
         assert resolver.is_allowed("hosts", "host-42", "reboot") is False
 
+    def test_privilege_per_object_isolation(self):
+        """Privileges on one object don't affect another."""
+        privileges = {
+            "vm-1": {PRIV_VM_POWER_ON: False},
+            "vm-2": {PRIV_VM_POWER_ON: True},
+        }
+        resolver = PermissionResolver({}, privileges=privileges)
+        assert resolver.is_allowed("vms", "vm-1", "power_on") is False
+        assert resolver.is_allowed("vms", "vm-2", "power_on") is True
+        # vm-3 not in privileges dict — defaults to allowed
+        assert resolver.is_allowed("vms", "vm-3", "power_on") is True
+
     def test_explain_mentions_privilege(self):
-        privileges = {PRIV_VM_POWER_ON: False}
+        privileges = {"vm-1": {PRIV_VM_POWER_ON: False}}
         resolver = PermissionResolver({}, privileges=privileges)
         msg = resolver.explain("vms", "vm-1", "power_on")
         assert "privilege" in msg.lower()
@@ -378,9 +390,11 @@ class TestVSpherePrivileges:
 
     def test_allowed_actions_excludes_unprivileged(self):
         privileges = {
-            PRIV_VM_POWER_ON: True,
-            PRIV_VM_POWER_OFF: False,
-            PRIV_VM_SNAPSHOT_CREATE: False,
+            "vm-1": {
+                PRIV_VM_POWER_ON: True,
+                PRIV_VM_POWER_OFF: False,
+                PRIV_VM_SNAPSHOT_CREATE: False,
+            },
         }
         resolver = PermissionResolver({}, privileges=privileges)
         actions = resolver.allowed_actions("vms", "vm-1")

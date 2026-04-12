@@ -56,12 +56,17 @@ class PermissionResolver:
     broader restriction).
     """
 
-    def __init__(self, restrictions: dict[str, Any], privileges: dict[str, bool] | None = None) -> None:
+    def __init__(
+        self,
+        restrictions: dict[str, Any],
+        privileges: dict[str, dict[str, bool]] | None = None,
+    ) -> None:
         """Store the restrictions configuration and vSphere account privileges.
 
         Args:
             restrictions: User-configured operation restrictions.
-            privileges: vSphere account privilege map from check_privileges().
+            privileges: Per-object privilege map from check_privileges().
+                        Keyed by moref, each value is {privilege_id: bool}.
                         If None or empty, all privileges are assumed granted.
         """
         self._restrictions = restrictions
@@ -111,12 +116,17 @@ class PermissionResolver:
         ``reason`` is a human-readable description of the deciding rule.
         """
         # ------------------------------------------------------------------
-        # Step 0: vSphere account privilege check
+        # Step 0: vSphere account privilege check (per-object)
         # ------------------------------------------------------------------
         if self._privileges:
-            required_priv = ACTION_PRIVILEGE_MAP.get(action)
-            if required_priv and not self._privileges.get(required_priv, True):
-                return True, (f"{action} is blocked because the vSphere account lacks the '{required_priv}' privilege")
+            obj_privs = self._privileges.get(moref, {})
+            if obj_privs:
+                required_priv = ACTION_PRIVILEGE_MAP.get(action)
+                if required_priv and not obj_privs.get(required_priv, True):
+                    return True, (
+                        f"{action} is blocked on {moref} because the vSphere account "
+                        f"lacks the '{required_priv}' privilege on this object"
+                    )
 
         obj_rules: dict[str, Any] = self._restrictions.get(category, {}).get(moref, {})
         cat_restrictions: dict[str, Any] = self._restrictions.get("categories", {}).get(category, {})

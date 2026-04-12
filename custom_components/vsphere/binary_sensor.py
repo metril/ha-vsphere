@@ -51,13 +51,6 @@ HOST_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: bool(d.get("maintenance_mode")),
     ),
-    VSphereBinarySensorDescription(
-        key="shutdown_supported",
-        translation_key="shutdown_supported",
-        name="Shutdown Supported",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: bool(d.get("shutdown_supported")),
-    ),
 )
 
 # ---------------------------------------------------------------------------

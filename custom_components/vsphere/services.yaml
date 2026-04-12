@@ -153,3 +153,15 @@ vm_migrate:
       selector:
         device:
           integration: vsphere
+
+refresh_privileges:
+  name: Refresh Privileges
+  description: Re-check vSphere account privileges for all hosts and VMs. Updates which actions are available based on the account's current permissions. Triggers an integration reload.
+  fields:
+    device_id:
+      name: vSphere Instance
+      description: The root vSphere device.
+      required: true
+      selector:
+        device:
+          integration: vsphere
