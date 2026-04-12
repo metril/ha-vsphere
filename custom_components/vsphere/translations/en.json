@@ -108,20 +108,48 @@
                     "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes"
                 }
             },
-            "object_restrictions": {
-                "title": "Per-Object Restrictions",
-                "description": "Block specific actions on individual hosts or VMs. Select the objects to restrict, then choose which actions to block on them.",
+            "vm_restrictions_toggle": {
+                "title": "VM Restrictions",
+                "description": "Would you like to block specific actions on individual virtual machines?",
                 "data": {
-                    "restricted_vms": "VMs to restrict",
-                    "vm_blocked_actions": "Actions to block on selected VMs",
-                    "restricted_hosts": "Hosts to restrict",
-                    "host_blocked_actions": "Actions to block on selected hosts"
+                    "configure_vm_restrictions": "Configure VM restrictions"
                 },
                 "data_description": {
-                    "restricted_vms": "The selected blocked actions will apply to all chosen VMs",
-                    "vm_blocked_actions": "These actions will be blocked on all VMs selected above",
-                    "restricted_hosts": "The selected blocked actions will apply to all chosen hosts",
-                    "host_blocked_actions": "These actions will be blocked on all hosts selected above"
+                    "configure_vm_restrictions": "Select specific VMs and choose which actions to block on them"
+                }
+            },
+            "vm_restrictions": {
+                "title": "VM Restrictions",
+                "description": "Select VMs to restrict and choose which actions to block.",
+                "data": {
+                    "restricted_vms": "VMs to restrict",
+                    "vm_blocked_actions": "Actions to block"
+                },
+                "data_description": {
+                    "restricted_vms": "Select one or more VMs",
+                    "vm_blocked_actions": "These actions will be blocked on all selected VMs"
+                }
+            },
+            "host_restrictions_toggle": {
+                "title": "Host Restrictions",
+                "description": "Would you like to block specific actions on individual ESXi hosts?",
+                "data": {
+                    "configure_host_restrictions": "Configure host restrictions"
+                },
+                "data_description": {
+                    "configure_host_restrictions": "Select specific hosts and choose which actions to block on them"
+                }
+            },
+            "host_restrictions": {
+                "title": "Host Restrictions",
+                "description": "Select hosts to restrict and choose which actions to block.",
+                "data": {
+                    "restricted_hosts": "Hosts to restrict",
+                    "host_blocked_actions": "Actions to block"
+                },
+                "data_description": {
+                    "restricted_hosts": "Select one or more ESXi hosts",
+                    "host_blocked_actions": "These actions will be blocked on all selected hosts"
                 }
             },
             "reauth_confirm": {
@@ -242,20 +270,48 @@
                     "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes"
                 }
             },
-            "object_restrictions": {
-                "title": "Per-Object Restrictions",
-                "description": "Block specific actions on individual hosts or VMs. Select the objects to restrict, then choose which actions to block on them.",
+            "vm_restrictions_toggle": {
+                "title": "VM Restrictions",
+                "description": "Would you like to block specific actions on individual virtual machines?",
                 "data": {
-                    "restricted_vms": "VMs to restrict",
-                    "vm_blocked_actions": "Actions to block on selected VMs",
-                    "restricted_hosts": "Hosts to restrict",
-                    "host_blocked_actions": "Actions to block on selected hosts"
+                    "configure_vm_restrictions": "Configure VM restrictions"
                 },
                 "data_description": {
-                    "restricted_vms": "The selected blocked actions will apply to all chosen VMs",
-                    "vm_blocked_actions": "These actions will be blocked on all VMs selected above",
-                    "restricted_hosts": "The selected blocked actions will apply to all chosen hosts",
-                    "host_blocked_actions": "These actions will be blocked on all hosts selected above"
+                    "configure_vm_restrictions": "Select specific VMs and choose which actions to block on them"
+                }
+            },
+            "vm_restrictions": {
+                "title": "VM Restrictions",
+                "description": "Select VMs to restrict and choose which actions to block.",
+                "data": {
+                    "restricted_vms": "VMs to restrict",
+                    "vm_blocked_actions": "Actions to block"
+                },
+                "data_description": {
+                    "restricted_vms": "Select one or more VMs",
+                    "vm_blocked_actions": "These actions will be blocked on all selected VMs"
+                }
+            },
+            "host_restrictions_toggle": {
+                "title": "Host Restrictions",
+                "description": "Would you like to block specific actions on individual ESXi hosts?",
+                "data": {
+                    "configure_host_restrictions": "Configure host restrictions"
+                },
+                "data_description": {
+                    "configure_host_restrictions": "Select specific hosts and choose which actions to block on them"
+                }
+            },
+            "host_restrictions": {
+                "title": "Host Restrictions",
+                "description": "Select hosts to restrict and choose which actions to block.",
+                "data": {
+                    "restricted_hosts": "Hosts to restrict",
+                    "host_blocked_actions": "Actions to block"
+                },
+                "data_description": {
+                    "restricted_hosts": "Select one or more ESXi hosts",
+                    "host_blocked_actions": "These actions will be blocked on all selected hosts"
                 }
             }
         }
