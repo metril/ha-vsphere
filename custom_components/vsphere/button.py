@@ -50,23 +50,26 @@ async def async_setup_entry(
     if categories.get("hosts"):
         for moref, host_data in coordinator.data.get("hosts", {}).items():
             name: str = host_data.get("name", moref)
-            entities.append(
-                HostRebootButton(
-                    coordinator=coordinator,
-                    entry=entry,
-                    moref=moref,
-                    name=name,
-                    client=client,
-                    resolver=resolver,
+            for host_button_cls in (HostShutdownButton, HostRebootButton):
+                entities.append(
+                    host_button_cls(
+                        coordinator=coordinator,
+                        entry=entry,
+                        moref=moref,
+                        name=name,
+                        client=client,
+                        resolver=resolver,
+                    )
                 )
-            )
 
     if categories.get("vms"):
         for moref, vm_data in coordinator.data.get("vms", {}).items():
             name = vm_data.get("name", moref)
             for button_cls in (
+                VmShutdownButton,
                 VmRebootButton,
                 VmResetButton,
+                VmSuspendButton,
                 VmSnapshotCreateButton,
                 VmSnapshotRemoveAllButton,
                 VmSnapshotRemoveFirstButton,
@@ -114,6 +117,35 @@ class _VSphereButton(VSphereEntity, ButtonEntity):
         raise NotImplementedError
 
 
+class HostShutdownButton(_VSphereButton):
+    """Button to shut down a host."""
+
+    _button_name = "Shutdown"
+    _unique_id_suffix = "host_shutdown"
+    _attr_icon = "mdi:power"
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        moref: str,
+        name: str,
+        client: VSphereClient,
+        resolver: PermissionResolver,
+    ) -> None:
+        """Initialize."""
+        super().__init__(coordinator, entry, "hosts", moref, name, client, resolver)
+
+    async def async_press(self) -> None:
+        """Shut down the host."""
+        if not self._resolver.is_allowed("hosts", self._moref, HostAction.SHUTDOWN):
+            raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.SHUTDOWN))
+        try:
+            await self.hass.async_add_executor_job(self._client.host_power, self._moref, "shutdown")
+        except VSphereOperationError as err:
+            raise HomeAssistantError(f"Failed to shut down host {self._moref}: {err}") from err
+
+
 class HostRebootButton(_VSphereButton):
     """Button to reboot a host."""
 
@@ -142,6 +174,35 @@ class HostRebootButton(_VSphereButton):
             await self.hass.async_add_executor_job(self._client.host_power, self._moref, "reboot")
         except VSphereOperationError as err:
             raise HomeAssistantError(f"Failed to reboot host {self._moref}: {err}") from err
+
+
+class VmShutdownButton(_VSphereButton):
+    """Button to gracefully shut down a VM via VMware Tools."""
+
+    _button_name = "Shutdown"
+    _unique_id_suffix = "vm_shutdown"
+    _attr_icon = "mdi:power"
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        moref: str,
+        name: str,
+        client: VSphereClient,
+        resolver: PermissionResolver,
+    ) -> None:
+        """Initialize."""
+        super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
+
+    async def async_press(self) -> None:
+        """Gracefully shut down the VM."""
+        if not self._resolver.is_allowed("vms", self._moref, VmAction.SHUTDOWN):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SHUTDOWN))
+        try:
+            await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "shutdown")
+        except VSphereOperationError as err:
+            raise HomeAssistantError(f"Failed to shut down VM {self._moref}: {err}") from err
 
 
 class VmRebootButton(_VSphereButton):
@@ -202,6 +263,35 @@ class VmResetButton(_VSphereButton):
             await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "reset")
         except VSphereOperationError as err:
             raise HomeAssistantError(f"Failed to reset VM {self._moref}: {err}") from err
+
+
+class VmSuspendButton(_VSphereButton):
+    """Button to suspend a VM."""
+
+    _button_name = "Suspend"
+    _unique_id_suffix = "vm_suspend"
+    _attr_icon = "mdi:pause-circle"
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        moref: str,
+        name: str,
+        client: VSphereClient,
+        resolver: PermissionResolver,
+    ) -> None:
+        """Initialize."""
+        super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
+
+    async def async_press(self) -> None:
+        """Suspend the VM."""
+        if not self._resolver.is_allowed("vms", self._moref, VmAction.SUSPEND):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SUSPEND))
+        try:
+            await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "suspend")
+        except VSphereOperationError as err:
+            raise HomeAssistantError(f"Failed to suspend VM {self._moref}: {err}") from err
 
 
 class VmSnapshotCreateButton(_VSphereButton):

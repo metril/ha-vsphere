@@ -68,8 +68,8 @@ PerformanceManager (poll) ──▶ PerfCoordinator ──▶ VSphereData.perf �
 
 | Category | Default | Entities |
 |----------|---------|----------|
-| Hosts | ON | 8 sensors, 3 binary, 1 switch, 1 button, 1 select |
-| VMs | ON | 8 sensors, 2 binary, 1 switch, 6 buttons |
+| Hosts | ON | 8 sensors, 2 binary, 1 switch, 2 buttons, 1 select |
+| VMs | ON | 12 sensors, 2 binary, 1 switch, 8 buttons |
 | Datastores | ON | 4 sensors |
 | Licenses | ON | 4 sensors |
 | Clusters | OFF | 3 sensors, 2 binary |

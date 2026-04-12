@@ -197,23 +197,10 @@ VM_SENSORS: tuple[VSphereSensorDescription, ...] = (
         value_fn=lambda d: d.get("guest_ip"),
     ),
     VSphereSensorDescription(
-        key="tools_status",
-        translation_key="tools_status",
-        name="Tools Status",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: d.get("tools_status"),
-    ),
-    VSphereSensorDescription(
         key="status",
         translation_key="status",
         name="Status",
         value_fn=lambda d: d.get("state"),
-    ),
-    VSphereSensorDescription(
-        key="state",
-        translation_key="state",
-        name="Power State",
-        value_fn=lambda d: d.get("power_state"),
     ),
     VSphereSensorDescription(
         key="host_name",
