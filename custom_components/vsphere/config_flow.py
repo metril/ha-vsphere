@@ -429,6 +429,7 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         self._filterable_remaining: list[Category] = []
         self._current_filter_category: Category | None = None
         self._entity_filter: dict[str, Any] = {}
+        self._restrictions: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Step 1: init — category toggles + perf interval
@@ -610,28 +611,19 @@ class VSphereOptionsFlow(OptionsFlowWithConfigEntry):
         current_options = dict(self.config_entry.options)
 
         if user_input is not None:
-            # Parse selected objects and their blocked actions
-            obj_restrictions: dict[str, dict[str, dict[str, bool]]] = {
-                "vms": dict(self._restrictions.get("vms", {})),
-                "hosts": dict(self._restrictions.get("hosts", {})),
-            }
+            # Build per-object restrictions from form input.
+            # Note: the same action set is applied to all selected objects in each category.
+            # Per-object differentiation requires editing restrictions individually.
+            vm_restrictions: dict[str, dict[str, bool]] = {}
+            for vm_moref in user_input.get("restricted_vms", []):
+                vm_restrictions[vm_moref] = {a: True for a in user_input.get("vm_blocked_actions", [])}
 
-            # Process VM restrictions
-            restricted_vms: list[str] = user_input.get("restricted_vms", [])
-            vm_blocked_actions: list[str] = user_input.get("vm_blocked_actions", [])
-            # Clear previous per-object VM restrictions, then set new ones
-            obj_restrictions["vms"] = {}
-            for vm_moref in restricted_vms:
-                obj_restrictions["vms"][vm_moref] = {action: True for action in vm_blocked_actions}
+            host_restrictions: dict[str, dict[str, bool]] = {}
+            for host_moref in user_input.get("restricted_hosts", []):
+                host_restrictions[host_moref] = {a: True for a in user_input.get("host_blocked_actions", [])}
 
-            # Process host restrictions
-            restricted_hosts: list[str] = user_input.get("restricted_hosts", [])
-            host_blocked_actions: list[str] = user_input.get("host_blocked_actions", [])
-            obj_restrictions["hosts"] = {}
-            for host_moref in restricted_hosts:
-                obj_restrictions["hosts"][host_moref] = {action: True for action in host_blocked_actions}
-
-            self._restrictions.update(obj_restrictions)
+            self._restrictions["vms"] = vm_restrictions
+            self._restrictions["hosts"] = host_restrictions
 
             return self.async_create_entry(
                 data={

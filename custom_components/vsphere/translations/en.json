@@ -96,7 +96,11 @@
             },
             "entity_selection": {
                 "title": "{category} Selection",
-                "description": "Choose which {category} to monitor. Toggle 'Monitor all' to automatically include newly added objects, or disable it to pick specific ones."
+                "description": "Choose which {category} to monitor. Toggle 'Monitor all' to automatically include newly added objects, or disable it to pick specific ones.",
+                "data": {
+                    "select_all": "Monitor all {category} (including future additions)",
+                    "selected_objects": "Select specific {category}"
+                }
             },
             "restrictions": {
                 "title": "Global Operation Restrictions",
