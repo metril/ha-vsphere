@@ -629,7 +629,6 @@ SENSOR_MAP: dict[str, tuple[tuple[VSphereSensorDescription, ...], str]] = {
     "hosts": (HOST_SENSORS, "hosts"),
     "vms": (VM_SENSORS, "vms"),
     "datastores": (DATASTORE_SENSORS, "datastores"),
-    "licenses": (LICENSE_SENSORS, "licenses"),
     "clusters": (CLUSTER_SENSORS, "clusters"),
     "resource_pools": (RESOURCE_POOL_SENSORS, "resource_pools"),
 }
@@ -661,6 +660,25 @@ async def async_setup_entry(
                         moref=moref,
                         name=name,
                         description=description,
+                    )
+                )
+
+    # License sensors: attach to root device, read from "licenses" data
+    if categories.get("licenses"):
+        for lic_key, lic_data in coordinator.data.get("licenses", {}).items():
+            name = lic_data.get("name", lic_key)
+            for description in LICENSE_SENSORS:
+                entities.append(
+                    VSphereChildSensor(
+                        coordinator=coordinator,
+                        entry=entry,
+                        parent_object_type="root",
+                        parent_moref=entry.entry_id,
+                        parent_name=entry.title,
+                        data_category="licenses",
+                        data_moref=lic_key,
+                        description=description,
+                        entity_name=name,
                     )
                 )
 
