@@ -72,6 +72,7 @@
         "switch": {
             "power": { "name": "Power" },
             "force_arm": { "name": "Power Off (Arm)" },
+            "force_arm_host": { "name": "Force Ops (Arm)" },
             "maintenance_mode": { "name": "Maintenance Mode" }
         },
         "button": {

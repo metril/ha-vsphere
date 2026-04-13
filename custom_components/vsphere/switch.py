@@ -245,6 +245,8 @@ class VmForceArmSwitch(_ForceArmSwitch):
 class HostForceArmSwitch(_ForceArmSwitch):
     """Arm toggle for host force shutdown/reboot."""
 
+    _attr_translation_key = "force_arm_host"
+
     def __init__(self, coordinator: VSphereData, entry: ConfigEntry, moref: str, name: str) -> None:
         """Initialize."""
         super().__init__(coordinator, entry, "hosts", moref, name)

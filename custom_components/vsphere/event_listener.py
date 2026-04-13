@@ -256,6 +256,11 @@ class VSphereEventListener:
             )
             return
 
+        # Skip objects not in the entity filter (applies to all update kinds)
+        filter_config: dict[str, Any] = self._entity_filter.get(category, {})
+        if filter_config.get("mode", "all") == "select" and moref not in set(filter_config.get("morefs", [])):
+            return
+
         properties: dict[str, Any] = {}
         for change in obj_update.changeSet:
             properties[change.name] = change.val
@@ -270,11 +275,6 @@ class VSphereEventListener:
         # Fire vsphere_event for significant property changes (e.g. power state transitions)
         if kind == "modify" and category in ("hosts", "vms"):
             self._check_and_fire_vsphere_events(category, moref, properties)
-
-        # Skip objects not in the entity filter (applies to all update kinds)
-        filter_config: dict[str, Any] = self._entity_filter.get(category, {})
-        if filter_config.get("mode", "all") == "select" and moref not in set(filter_config.get("morefs", [])):
-            return
 
         if kind == "enter":
             self._fire_event(
