@@ -380,19 +380,25 @@ async def _handle_force_operation(
     hass: HomeAssistant,
     call: ServiceCall,
     error_label: str,
+    category: str,
+    action: str,
     call_fn: Any,
 ) -> None:
     """Shared logic for force power services (arm check + execute + disarm)."""
     from . import clear_armed, is_armed  # noqa: PLC0415
 
-    client, _, entry_id, moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
-    if not call.data[ATTR_CONFIRM] and not is_armed(hass, entry_id, moref):
+    client, resolver, entry_id, moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
+    if resolver and not resolver.is_allowed(category, moref, action):
+        raise HomeAssistantError(resolver.explain(category, moref, action))
+    was_armed = is_armed(hass, entry_id, moref)
+    if not call.data[ATTR_CONFIRM] and not was_armed:
         raise HomeAssistantError(f"{error_label} is not armed. Set confirm=true or arm the switch first.")
     try:
         await call_fn(hass, client, moref)
     except VSphereOperationError as err:
         raise HomeAssistantError(str(err)) from err
-    clear_armed(hass, entry_id, moref)
+    if was_armed:
+        clear_armed(hass, entry_id, moref)
 
 
 async def _handle_vm_force_power_off(hass: HomeAssistant, call: ServiceCall) -> None:
@@ -401,6 +407,8 @@ async def _handle_vm_force_power_off(hass: HomeAssistant, call: ServiceCall) -> 
         hass,
         call,
         "Force power off",
+        "vms",
+        VmAction.POWER_OFF,
         lambda h, c, m: h.async_add_executor_job(c.vm_power, m, "power_off"),
     )
 
@@ -411,6 +419,8 @@ async def _handle_host_force_shutdown(hass: HomeAssistant, call: ServiceCall) ->
         hass,
         call,
         "Force shutdown",
+        "hosts",
+        HostAction.SHUTDOWN,
         lambda h, c, m: h.async_add_executor_job(c.host_power, m, "shutdown", True),
     )
 
@@ -421,6 +431,8 @@ async def _handle_host_force_reboot(hass: HomeAssistant, call: ServiceCall) -> N
         hass,
         call,
         "Force reboot",
+        "hosts",
+        HostAction.REBOOT,
         lambda h, c, m: h.async_add_executor_job(c.host_power, m, "reboot", True),
     )
 

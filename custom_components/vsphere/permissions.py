@@ -40,8 +40,8 @@ _CATEGORY_ACTIONS: dict[str, set[str]] = {
 # Shortcut group → (category filter, action set) mapping.
 # category filter of None means the group applies to all categories.
 _SHORTCUT_GROUPS: dict[str, tuple[str | None, set[str]]] = {
-    RESTRICTION_GROUP_DESTRUCTIVE: (None, DESTRUCTIVE_ACTIONS),
-    RESTRICTION_GROUP_SNAPSHOTS: (None, SNAPSHOT_ACTIONS),
+    RESTRICTION_GROUP_DESTRUCTIVE: ("vms", DESTRUCTIVE_ACTIONS),
+    RESTRICTION_GROUP_SNAPSHOTS: ("vms", SNAPSHOT_ACTIONS),
     RESTRICTION_GROUP_MIGRATE: ("vms", {VmAction.MIGRATE}),
     RESTRICTION_GROUP_HOST_OPS: ("hosts", HOST_OPS_ACTIONS),
 }

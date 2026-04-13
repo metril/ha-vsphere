@@ -87,7 +87,6 @@ async def async_setup_entry(
 class _VSphereButton(VSphereEntity, ButtonEntity):
     """Base class for vSphere button entities."""
 
-    _button_name: str
     _unique_id_suffix: str
 
     def __init__(
@@ -106,7 +105,6 @@ class _VSphereButton(VSphereEntity, ButtonEntity):
         self._resolver = resolver
         self._entry_id = entry.entry_id
         self._attr_unique_id = f"{entry.entry_id}_{moref}_{self._unique_id_suffix}"
-        self._attr_name = self._button_name
 
     async def async_press(self) -> None:
         """Handle button press — implemented by subclasses."""
@@ -116,7 +114,7 @@ class _VSphereButton(VSphereEntity, ButtonEntity):
 class HostShutdownButton(_VSphereButton):
     """Button to shut down a host."""
 
-    _button_name = "Shutdown"
+    _attr_translation_key = "host_shutdown"
     _unique_id_suffix = "host_shutdown"
     _attr_icon = "mdi:power"
 
@@ -150,7 +148,7 @@ class HostShutdownButton(_VSphereButton):
 class HostRebootButton(_VSphereButton):
     """Button to reboot a host."""
 
-    _button_name = "Reboot"
+    _attr_translation_key = "host_reboot"
     _unique_id_suffix = "host_reboot"
     _attr_device_class = ButtonDeviceClass.RESTART
     _attr_icon = "mdi:restart"
@@ -185,7 +183,7 @@ class HostRebootButton(_VSphereButton):
 class VmRebootButton(_VSphereButton):
     """Button to reboot a VM."""
 
-    _button_name = "Reboot"
+    _attr_translation_key = "vm_reboot"
     _unique_id_suffix = "vm_reboot"
     _attr_device_class = ButtonDeviceClass.RESTART
     _attr_icon = "mdi:restart"
@@ -215,7 +213,7 @@ class VmRebootButton(_VSphereButton):
 class VmResetButton(_VSphereButton):
     """Button to hard-reset a VM."""
 
-    _button_name = "Reset"
+    _attr_translation_key = "vm_reset"
     _unique_id_suffix = "vm_reset"
     _attr_device_class = ButtonDeviceClass.RESTART
     _attr_icon = "mdi:power-cycle"
@@ -245,7 +243,7 @@ class VmResetButton(_VSphereButton):
 class VmSuspendButton(_VSphereButton):
     """Button to suspend a VM."""
 
-    _button_name = "Suspend"
+    _attr_translation_key = "vm_suspend"
     _unique_id_suffix = "vm_suspend"
     _attr_icon = "mdi:pause-circle"
 
@@ -274,7 +272,7 @@ class VmSuspendButton(_VSphereButton):
 class VmSnapshotCreateButton(_VSphereButton):
     """Button to create a VM snapshot."""
 
-    _button_name = "Create Snapshot"
+    _attr_translation_key = "vm_snapshot_create"
     _unique_id_suffix = "vm_snapshot_create"
     _attr_icon = "mdi:camera"
 
@@ -306,7 +304,7 @@ class VmSnapshotRemoveButton(_VSphereButton):
     If "All snapshots" is selected, removes all snapshots.
     """
 
-    _button_name = "Remove Snapshot"
+    _attr_translation_key = "vm_snapshot_remove"
     _unique_id_suffix = "vm_snapshot_remove"
     _attr_icon = "mdi:camera-off"
 

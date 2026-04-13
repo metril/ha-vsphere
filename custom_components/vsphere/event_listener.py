@@ -271,10 +271,12 @@ class VSphereEventListener:
         if kind == "modify" and category in ("hosts", "vms"):
             self._check_and_fire_vsphere_events(category, moref, properties)
 
+        # Skip objects not in the entity filter (applies to all update kinds)
+        filter_config: dict[str, Any] = self._entity_filter.get(category, {})
+        if filter_config.get("mode", "all") == "select" and moref not in set(filter_config.get("morefs", [])):
+            return
+
         if kind == "enter":
-            filter_config: dict[str, Any] = self._entity_filter.get(category, {})
-            if filter_config.get("mode", "all") == "select" and moref not in set(filter_config.get("morefs", [])):
-                return
             self._fire_event(
                 "vsphere_inventory_change",
                 {

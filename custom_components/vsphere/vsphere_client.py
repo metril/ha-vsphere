@@ -195,12 +195,14 @@ class VSphereClient:
         conn = self._connect()
         try:
             view = self._get_container_view(conn, [vim.HostSystem])
-            result: dict[str, dict[str, Any]] = {}
-            for host in view.view:
-                moref = host._moId  # noqa: SLF001
-                result[moref] = self._parse_host(host, moref)
-            view.Destroy()
-            return result
+            try:
+                result: dict[str, dict[str, Any]] = {}
+                for host in view.view:
+                    moref = host._moId  # noqa: SLF001
+                    result[moref] = self._parse_host(host, moref)
+                return result
+            finally:
+                view.Destroy()
         finally:
             self._disconnect(conn)
 
@@ -209,12 +211,14 @@ class VSphereClient:
         conn = self._connect()
         try:
             view = self._get_container_view(conn, [vim.VirtualMachine])
-            result: dict[str, dict[str, Any]] = {}
-            for vm_obj in view.view:
-                moref = vm_obj._moId  # noqa: SLF001
-                result[moref] = self._parse_vm(vm_obj, moref)
-            view.Destroy()
-            return result
+            try:
+                result: dict[str, dict[str, Any]] = {}
+                for vm_obj in view.view:
+                    moref = vm_obj._moId  # noqa: SLF001
+                    result[moref] = self._parse_vm(vm_obj, moref)
+                return result
+            finally:
+                view.Destroy()
         finally:
             self._disconnect(conn)
 
@@ -223,31 +227,33 @@ class VSphereClient:
         conn = self._connect()
         try:
             view = self._get_container_view(conn, [vim.Datastore])
-            result: dict[str, dict[str, Any]] = {}
-            for ds in view.view:
-                moref = ds._moId  # noqa: SLF001
-                try:
-                    summary = ds.summary
-                    info: dict[str, Any] = {
-                        "name": summary.name,
-                        "type": summary.type,
-                        "accessible": summary.accessible,
-                        "capacity_gb": round(summary.capacity / (1024**3), 2) if summary.capacity else 0.0,
-                        "free_gb": round(summary.freeSpace / (1024**3), 2) if summary.freeSpace else 0.0,
-                        "used_gb": round((summary.capacity - summary.freeSpace) / (1024**3), 2)
-                        if summary.capacity and summary.freeSpace is not None
-                        else 0.0,
-                        "url": summary.url or "",
-                        "connected_hosts": len(ds.host) if ds.host else 0,
-                        "host_morefs": [str(h.key._moId) for h in ds.host] if ds.host else [],  # noqa: SLF001
-                        "virtual_machines": len(ds.vm) if ds.vm else 0,
-                    }
-                except Exception:  # noqa: BLE001
-                    _LOGGER.debug("Error parsing datastore %s", moref, exc_info=True)
-                    info = {"name": moref}
-                result[moref] = info
-            view.Destroy()
-            return result
+            try:
+                result: dict[str, dict[str, Any]] = {}
+                for ds in view.view:
+                    moref = ds._moId  # noqa: SLF001
+                    try:
+                        summary = ds.summary
+                        info: dict[str, Any] = {
+                            "name": summary.name,
+                            "type": summary.type,
+                            "accessible": summary.accessible,
+                            "capacity_gb": round(summary.capacity / (1024**3), 2) if summary.capacity else 0.0,
+                            "free_gb": round(summary.freeSpace / (1024**3), 2) if summary.freeSpace else 0.0,
+                            "used_gb": round((summary.capacity - summary.freeSpace) / (1024**3), 2)
+                            if summary.capacity and summary.freeSpace is not None
+                            else 0.0,
+                            "url": summary.url or "",
+                            "connected_hosts": len(ds.host) if ds.host else 0,
+                            "host_morefs": [str(h.key._moId) for h in ds.host] if ds.host else [],  # noqa: SLF001
+                            "virtual_machines": len(ds.vm) if ds.vm else 0,
+                        }
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.debug("Error parsing datastore %s", moref, exc_info=True)
+                        info = {"name": moref}
+                    result[moref] = info
+                return result
+            finally:
+                view.Destroy()
         finally:
             self._disconnect(conn)
 
@@ -256,36 +262,40 @@ class VSphereClient:
         conn = self._connect()
         try:
             view = self._get_container_view(conn, [vim.ClusterComputeResource])
-            clusters: dict[str, dict[str, Any]] = {}
-            for cluster in view.view:
-                moref = cluster._moId  # noqa: SLF001
-                try:
-                    config = cluster.configuration
-                    summary = cluster.summary
-                    clusters[moref] = {
-                        "moref": moref,
-                        "name": cluster.name,
-                        "drs_enabled": config.drsConfig.enabled if config.drsConfig else False,
-                        "drs_automation_level": str(config.drsConfig.defaultVmBehavior)
-                        if config.drsConfig and config.drsConfig.enabled
-                        else None,
-                        "ha_enabled": config.dasConfig.enabled if config.dasConfig else False,
-                        "ha_admission_control": config.dasConfig.admissionControlEnabled if config.dasConfig else False,
-                        "total_hosts": summary.numHosts if summary else 0,
-                        "effective_hosts": summary.numEffectiveHosts if summary else 0,
-                        "total_cpu_mhz": summary.totalCpu if summary else 0,
-                        "total_memory_mb": round(summary.totalMemory / (1024 * 1024), 0)
-                        if summary and summary.totalMemory
-                        else 0,
-                        "vm_count": len(cluster.resourcePool.vm)
-                        if cluster.resourcePool and cluster.resourcePool.vm
-                        else 0,
-                    }
-                except Exception:  # noqa: BLE001
-                    _LOGGER.debug("Error parsing cluster %s", moref, exc_info=True)
-                    clusters[moref] = {"moref": moref, "name": moref}
-            view.Destroy()
-            return clusters
+            try:
+                clusters: dict[str, dict[str, Any]] = {}
+                for cluster in view.view:
+                    moref = cluster._moId  # noqa: SLF001
+                    try:
+                        config = cluster.configuration
+                        summary = cluster.summary
+                        clusters[moref] = {
+                            "moref": moref,
+                            "name": cluster.name,
+                            "drs_enabled": config.drsConfig.enabled if config.drsConfig else False,
+                            "drs_automation_level": str(config.drsConfig.defaultVmBehavior)
+                            if config.drsConfig and config.drsConfig.enabled
+                            else None,
+                            "ha_enabled": config.dasConfig.enabled if config.dasConfig else False,
+                            "ha_admission_control": config.dasConfig.admissionControlEnabled
+                            if config.dasConfig
+                            else False,
+                            "total_hosts": summary.numHosts if summary else 0,
+                            "effective_hosts": summary.numEffectiveHosts if summary else 0,
+                            "total_cpu_mhz": summary.totalCpu if summary else 0,
+                            "total_memory_mb": round(summary.totalMemory / (1024 * 1024), 0)
+                            if summary and summary.totalMemory
+                            else 0,
+                            "vm_count": len(cluster.resourcePool.vm)
+                            if cluster.resourcePool and cluster.resourcePool.vm
+                            else 0,
+                        }
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.debug("Error parsing cluster %s", moref, exc_info=True)
+                        clusters[moref] = {"moref": moref, "name": moref}
+                return clusters
+            finally:
+                view.Destroy()
         finally:
             self._disconnect(conn)
 
@@ -365,27 +375,29 @@ class VSphereClient:
         conn = self._connect()
         try:
             view = self._get_container_view(conn, [vim.ResourcePool])
-            pools: dict[str, dict[str, Any]] = {}
-            for pool in view.view:
-                moref = pool._moId  # noqa: SLF001
-                try:
-                    config = pool.config
-                    cpu_alloc = config.cpuAllocation if config else None
-                    mem_alloc = config.memoryAllocation if config else None
-                    pools[moref] = {
-                        "moref": moref,
-                        "name": pool.name,
-                        "cpu_reservation_mhz": cpu_alloc.reservation if cpu_alloc else 0,
-                        "cpu_limit_mhz": cpu_alloc.limit if cpu_alloc else -1,
-                        "memory_reservation_mb": mem_alloc.reservation if mem_alloc else 0,
-                        "memory_limit_mb": mem_alloc.limit if mem_alloc else -1,
-                        "vm_count": len(pool.vm) if pool.vm else 0,
-                    }
-                except Exception:  # noqa: BLE001
-                    _LOGGER.debug("Error parsing resource pool %s", moref, exc_info=True)
-                    pools[moref] = {"moref": moref, "name": moref}
-            view.Destroy()
-            return pools
+            try:
+                pools: dict[str, dict[str, Any]] = {}
+                for pool in view.view:
+                    moref = pool._moId  # noqa: SLF001
+                    try:
+                        config = pool.config
+                        cpu_alloc = config.cpuAllocation if config else None
+                        mem_alloc = config.memoryAllocation if config else None
+                        pools[moref] = {
+                            "moref": moref,
+                            "name": pool.name,
+                            "cpu_reservation_mhz": cpu_alloc.reservation if cpu_alloc else 0,
+                            "cpu_limit_mhz": cpu_alloc.limit if cpu_alloc else -1,
+                            "memory_reservation_mb": mem_alloc.reservation if mem_alloc else 0,
+                            "memory_limit_mb": mem_alloc.limit if mem_alloc else -1,
+                            "vm_count": len(pool.vm) if pool.vm else 0,
+                        }
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.debug("Error parsing resource pool %s", moref, exc_info=True)
+                        pools[moref] = {"moref": moref, "name": moref}
+                return pools
+            finally:
+                view.Destroy()
         finally:
             self._disconnect(conn)
 
@@ -520,21 +532,22 @@ class VSphereClient:
                 (vim.ResourcePool, "resource_pool"),
             ]:
                 view = self._get_container_view(conn, [obj_type])
-                for obj in view.view:
-                    moref = obj._moId  # noqa: SLF001
-                    try:
-                        # Different object types expose their name in different places
-                        summary_config = getattr(getattr(obj, "summary", None), "config", None)
-                        if summary_config is not None and hasattr(summary_config, "name"):
-                            name = summary_config.name
-                        elif hasattr(obj, "name"):
-                            name = obj.name
-                        else:
+                try:
+                    for obj in view.view:
+                        moref = obj._moId  # noqa: SLF001
+                        try:
+                            summary_config = getattr(getattr(obj, "summary", None), "config", None)
+                            if summary_config is not None and hasattr(summary_config, "name"):
+                                name = summary_config.name
+                            elif hasattr(obj, "name"):
+                                name = obj.name
+                            else:
+                                name = moref
+                        except Exception:  # noqa: BLE001
                             name = moref
-                    except Exception:  # noqa: BLE001
-                        name = moref
-                    result[moref] = {"moref": moref, "name": name, "type": category}
-                view.Destroy()
+                        result[moref] = {"moref": moref, "name": name, "type": category}
+                finally:
+                    view.Destroy()
 
             return result
         finally:
@@ -1073,18 +1086,18 @@ class VSphereClient:
             task = vm_obj.RelocateVM_Task(spec=relocate_spec)
             self._wait_for_task(task, f"migrate {vm_name} to {host_name}")
         except vim.fault.MigrationFault as err:
-            raise VSphereOperationError(f"Migration failed for {vm_name}: {err.msg}") from err
+            raise VSphereOperationError(f"Migration failed for {vm_name}: {err}") from err
         except (vim.fault.InvalidState, vim.fault.InvalidHostState) as err:
-            raise VSphereOperationError(f"Cannot migrate {vm_name} to {host_name}: {err.msg}") from err
+            raise VSphereOperationError(f"Cannot migrate {vm_name} to {host_name}: {err}") from err
         except vim.fault.InsufficientResourcesFault as err:
-            raise VSphereOperationError(f"Insufficient resources on {host_name}: {err.msg}") from err
+            raise VSphereOperationError(f"Insufficient resources on {host_name}: {err}") from err
         except vim.fault.NoPermission as exc:
             priv = getattr(exc, "privilegeId", "unknown")
             raise VSphereOperationError(
                 f"Permission denied for migrate on VM {vm_moref}: missing vSphere privilege '{priv}'"
             ) from exc
         except vmodl.MethodFault as err:
-            raise VSphereOperationError(f"vSphere error during migration of {vm_name}: {err.msg}") from err
+            raise VSphereOperationError(f"vSphere error during migration of {vm_name}: {err}") from err
 
     # ------------------------------------------------------------------
     # Host operations
@@ -1187,18 +1200,20 @@ class VSphereClient:
         conn = self._connect()
         try:
             view = self._get_container_view(conn, [vim.HostSystem])
-            hosts: list[dict[str, Any]] = []
-            for host in view.view:
-                moref = host._moId  # noqa: SLF001
-                try:
-                    name = host.summary.config.name
-                    state = str(host.summary.runtime.powerState)
-                except Exception:  # noqa: BLE001
-                    name = moref
-                    state = "unknown"
-                hosts.append({"moref": moref, "name": name, "power_state": state})
-            view.Destroy()
-            return hosts
+            try:
+                hosts: list[dict[str, Any]] = []
+                for host in view.view:
+                    moref = host._moId  # noqa: SLF001
+                    try:
+                        name = host.summary.config.name
+                        state = str(host.summary.runtime.powerState)
+                    except Exception:  # noqa: BLE001
+                        name = moref
+                        state = "unknown"
+                    hosts.append({"moref": moref, "name": name, "power_state": state})
+                return hosts
+            finally:
+                view.Destroy()
         finally:
             self._disconnect(conn)
 

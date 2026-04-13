@@ -668,7 +668,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
             if not errors:
                 new_unique_id = f"{flat_input[CONF_HOST]}:{flat_input[CONF_PORT]}"
                 await self.async_set_unique_id(new_unique_id)
-                self._abort_if_unique_id_configured(updates={**existing_data, **flat_input})
+                self._abort_if_unique_id_configured()
 
                 return self.async_update_reload_and_abort(
                     reconfigure_entry,

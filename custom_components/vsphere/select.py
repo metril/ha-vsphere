@@ -94,7 +94,7 @@ class HostPowerPolicySelect(VSphereEntity, SelectEntity):
         self._client = client
         self._resolver = resolver
         self._attr_unique_id = f"{entry.entry_id}_{moref}_power_policy"
-        self._attr_name = "Power Policy"
+        self._attr_translation_key = "power_policy"
         # Build initial options list from policy short names
         self._attr_options = [p.get("short_name", str(p.get("key", ""))) for p in policies]
 
@@ -142,7 +142,7 @@ class VmSnapshotSelect(VSphereEntity, SelectEntity):
         """Initialize the VM snapshot select."""
         super().__init__(coordinator, entry, "vms", moref, name)
         self._attr_unique_id = f"{entry.entry_id}_{moref}_snapshot_select"
-        self._attr_name = "Snapshot"
+        self._attr_translation_key = "snapshot"
         self._selected: str | None = None
 
     @property

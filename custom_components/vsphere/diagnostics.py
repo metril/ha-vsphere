@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-REDACT_KEYS = {"password", "username", "host", "license_key", "key", "guest_ip"}
+REDACT_KEYS = {"password", "username", "host", "license_key", "key", "guest_ip", "ssl_ca_path"}
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:

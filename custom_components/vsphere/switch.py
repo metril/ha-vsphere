@@ -120,7 +120,7 @@ class VmPowerSwitch(VSphereEntity, SwitchEntity):
         self._resolver = resolver
         self._entry_id = entry.entry_id
         self._attr_unique_id = f"{entry.entry_id}_{moref}_power_switch"
-        self._attr_name = "Power"
+        self._attr_translation_key = "power"
 
     @property
     def is_on(self) -> bool | None:
@@ -187,7 +187,7 @@ class _ForceArmSwitch(VSphereEntity, SwitchEntity):
         self._entry_id = entry.entry_id
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{moref}_force_arm"
-        self._attr_name = "Power Off (Arm)"
+        self._attr_translation_key = "force_arm"
         self._disarm_cancel: CALLBACK_TYPE | None = None
 
     @property
@@ -275,7 +275,7 @@ class HostMaintenanceSwitch(VSphereEntity, SwitchEntity):
         self._client = client
         self._resolver = resolver
         self._attr_unique_id = f"{entry.entry_id}_{moref}_maintenance_switch"
-        self._attr_name = "Maintenance Mode"
+        self._attr_translation_key = "maintenance_mode"
 
     @property
     def is_on(self) -> bool | None:

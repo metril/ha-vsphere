@@ -250,6 +250,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     perf_coordinator: VSpherePerfCoordinator | None = entry_data.get("perf_coordinator")
     client: VSphereClient | None = entry_data.get("client")
 
+    # Unload platforms first to stop entity callbacks before tearing down data sources
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
     # Stop the event listener
     if event_listener is not None:
         await hass.async_add_executor_job(event_listener.stop)
@@ -261,9 +264,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Disconnect the poll connection
     if client is not None:
         await hass.async_add_executor_job(client.disconnect_poll)
-
-    # Unload platforms
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     # Remove from hass.data
     hass.data[DOMAIN].pop(entry.entry_id, None)

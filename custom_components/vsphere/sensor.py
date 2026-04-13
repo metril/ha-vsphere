@@ -84,12 +84,12 @@ HOST_SENSORS: tuple[VSphereSensorDescription, ...] = (
         name="Uptime",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.HOURS,
-        state_class=SensorStateClass.TOTAL_INCREASING,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("uptime_hours"),
     ),
     VSphereSensorDescription(
         key="vm_count",
-        translation_key="vm_count",
+        translation_key="host_vm_count",
         name="Running VMs",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("vm_count"),
@@ -172,7 +172,7 @@ VM_SENSORS: tuple[VSphereSensorDescription, ...] = (
         name="Uptime",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.HOURS,
-        state_class=SensorStateClass.TOTAL_INCREASING,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("uptime_hours"),
     ),
     VSphereSensorDescription(
@@ -283,7 +283,7 @@ LICENSE_SENSORS: tuple[VSphereSensorDescription, ...] = (
         translation_key="product",
         name="Product",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: d.get("name"),
+        value_fn=lambda d: d.get("product"),
     ),
 )
 
@@ -332,7 +332,7 @@ CLUSTER_SENSORS: tuple[VSphereSensorDescription, ...] = (
     ),
     VSphereSensorDescription(
         key="vm_count",
-        translation_key="vm_count",
+        translation_key="cluster_vm_count",
         name="Cluster VMs",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("vm_count"),
@@ -426,7 +426,7 @@ RESOURCE_POOL_SENSORS: tuple[VSphereSensorDescription, ...] = (
     ),
     VSphereSensorDescription(
         key="vm_count",
-        translation_key="vm_count",
+        translation_key="pool_vm_count",
         name="Pool VMs",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("vm_count"),

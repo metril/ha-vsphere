@@ -118,6 +118,7 @@ remove_snapshot:
 list_hosts:
   name: List Hosts
   description: Return a list of all ESXi hosts managed by this vSphere connection.
+  response_supported: true
   fields:
     device_id:
       required: true
@@ -128,6 +129,7 @@ list_hosts:
 list_power_policies:
   name: List Power Policies
   description: Return the available power management policies for an ESXi host.
+  response_supported: true
   fields:
     device_id:
       required: true
