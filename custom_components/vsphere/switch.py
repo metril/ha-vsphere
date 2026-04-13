@@ -170,7 +170,6 @@ class _ForceArmSwitch(VSphereEntity, SwitchEntity):
     configurable timeout.
     """
 
-    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:shield-alert"
 
     def __init__(
@@ -186,7 +185,7 @@ class _ForceArmSwitch(VSphereEntity, SwitchEntity):
         self._entry_id = entry.entry_id
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{moref}_force_arm"
-        self._attr_name = "Force Power (Arm)"
+        self._attr_name = "Power Off (Arm)"
         self._disarm_cancel: CALLBACK_TYPE | None = None
 
     @property

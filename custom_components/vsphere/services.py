@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
@@ -32,6 +34,7 @@ SVC_REMOVE_SNAPSHOT = "remove_snapshot"
 SVC_LIST_HOSTS = "list_hosts"
 SVC_LIST_POWER_POLICIES = "list_power_policies"
 SVC_VM_MIGRATE = "vm_migrate"
+SVC_REMOVE_SNAPSHOTS = "remove_snapshots"
 SVC_VM_FORCE_POWER_OFF = "vm_force_power_off"
 SVC_HOST_FORCE_SHUTDOWN = "host_force_shutdown"
 SVC_HOST_FORCE_REBOOT = "host_force_reboot"
@@ -116,6 +119,15 @@ _SCHEMA_VM_MIGRATE = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): str,
         vol.Required("target_host"): str,
+    }
+)
+
+ATTR_SNAPSHOTS = "snapshots"
+
+_SCHEMA_REMOVE_SNAPSHOTS = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_SNAPSHOTS): vol.All(cv.ensure_list, [str]),
     }
 )
 
@@ -340,6 +352,38 @@ async def _handle_vm_migrate(call: ServiceCall) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Snapshot removal by name(s)
+# ---------------------------------------------------------------------------
+
+
+async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Remove one or more snapshots by name. Pass 'all' to remove all snapshots."""
+    client, _, entry_id, vm_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
+    snapshot_names: list[str] = call.data[ATTR_SNAPSHOTS]
+
+    # Get snapshot data from coordinator
+    coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
+    vm_data = coordinator.data.get("vms", {}).get(vm_moref, {})
+    snapshots: list[dict[str, str]] = vm_data.get("snapshots", [])
+
+    for snap_name in snapshot_names:
+        if snap_name.lower() == "all":
+            try:
+                await hass.async_add_executor_job(client.remove_snapshot, vm_moref, SNAP_ALL)
+            except VSphereOperationError as err:
+                raise HomeAssistantError(str(err)) from err
+            return  # "all" removes everything, no need to continue
+
+        snap_moref = next((s["moref"] for s in snapshots if s["name"] == snap_name), None)
+        if snap_moref is None:
+            raise HomeAssistantError(f"Snapshot '{snap_name}' not found on VM {vm_moref}")
+        try:
+            await hass.async_add_executor_job(client.remove_snapshot_by_moref, vm_moref, snap_moref)
+        except VSphereOperationError as err:
+            raise HomeAssistantError(str(err)) from err
+
+
+# ---------------------------------------------------------------------------
 # Force power handlers (arm-bypass with confirm=True)
 # ---------------------------------------------------------------------------
 
@@ -468,11 +512,19 @@ async def async_register_services(hass: HomeAssistant) -> None:
             schema=_SCHEMA_VM_MIGRATE,
         )
 
+    if not hass.services.has_service(DOMAIN, SVC_REMOVE_SNAPSHOTS):
+        hass.services.async_register(
+            DOMAIN,
+            SVC_REMOVE_SNAPSHOTS,
+            partial(_handle_remove_snapshots, hass),
+            schema=_SCHEMA_REMOVE_SNAPSHOTS,
+        )
+
     if not hass.services.has_service(DOMAIN, SVC_VM_FORCE_POWER_OFF):
         hass.services.async_register(
             DOMAIN,
             SVC_VM_FORCE_POWER_OFF,
-            lambda call: _handle_vm_force_power_off(hass, call),
+            partial(_handle_vm_force_power_off, hass),
             schema=_SCHEMA_FORCE_CONFIRM,
         )
 
@@ -480,7 +532,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(
             DOMAIN,
             SVC_HOST_FORCE_SHUTDOWN,
-            lambda call: _handle_host_force_shutdown(hass, call),
+            partial(_handle_host_force_shutdown, hass),
             schema=_SCHEMA_FORCE_CONFIRM,
         )
 
@@ -488,7 +540,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(
             DOMAIN,
             SVC_HOST_FORCE_REBOOT,
-            lambda call: _handle_host_force_reboot(hass, call),
+            partial(_handle_host_force_reboot, hass),
             schema=_SCHEMA_FORCE_CONFIRM,
         )
 
@@ -507,6 +559,7 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SVC_LIST_HOSTS,
         SVC_LIST_POWER_POLICIES,
         SVC_VM_MIGRATE,
+        SVC_REMOVE_SNAPSHOTS,
         SVC_VM_FORCE_POWER_OFF,
         SVC_HOST_FORCE_SHUTDOWN,
         SVC_HOST_FORCE_REBOOT,

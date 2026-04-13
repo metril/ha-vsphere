@@ -154,6 +154,24 @@ vm_migrate:
         device:
           integration: vsphere
 
+remove_snapshots:
+  name: Remove Snapshots
+  description: Remove one or more snapshots from a virtual machine by name. Pass "all" to remove all snapshots.
+  fields:
+    device_id:
+      name: VM
+      description: The virtual machine to remove snapshots from.
+      required: true
+      selector:
+        device:
+          integration: vsphere
+    snapshots:
+      name: Snapshots
+      description: List of snapshot names to remove. Use "all" to remove all snapshots.
+      required: true
+      selector:
+        object:
+
 vm_force_power_off:
   name: Force Power Off VM
   description: Hard power off a virtual machine immediately. Bypasses arm requirement when confirm is true.

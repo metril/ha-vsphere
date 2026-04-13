@@ -385,9 +385,12 @@ class VSphereEventListener:
         if "_snapshot_obj" in d:
             snap_obj = d.pop("_snapshot_obj")
             if snap_obj is not None and hasattr(snap_obj, "rootSnapshotList"):
-                d["snapshot_count"] = self._count_snapshots(snap_obj.rootSnapshotList)
+                snapshots = self._flatten_snapshots(snap_obj.rootSnapshotList)
+                d["snapshot_count"] = len(snapshots)
+                d["snapshots"] = snapshots
             else:
                 d["snapshot_count"] = 0
+                d["snapshots"] = []
         d.pop("_configured_guest_os", None)
         d.pop("_config_status", None)
 
@@ -412,14 +415,17 @@ class VSphereEventListener:
             d["virtual_machines"] = len(val) if val else 0
 
     @staticmethod
-    def _count_snapshots(snapshot_list: Any) -> int:
-        """Recursively count snapshots in a tree."""
-        count = 0
-        if snapshot_list:
-            for snap in snapshot_list:
-                count += 1
-                count += VSphereEventListener._count_snapshots(snap.childSnapshotList)
-        return count
+    def _flatten_snapshots(snapshot_list: Any) -> list[dict[str, str]]:
+        """Recursively flatten a snapshot tree into a list of {name, moref} dicts."""
+        result: list[dict[str, str]] = []
+        for snap in snapshot_list or []:
+            moref_str = ""
+            with contextlib.suppress(Exception):
+                moref_str = str(snap.snapshot._moId)  # noqa: SLF001
+            if moref_str:
+                result.append({"name": snap.name, "moref": moref_str})
+            result.extend(VSphereEventListener._flatten_snapshots(snap.childSnapshotList))
+        return result
 
     def _obj_type_to_category(self, obj_type: type) -> str | None:
         """Map a pyVmomi object type to a data category string."""

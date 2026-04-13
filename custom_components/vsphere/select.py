@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+_ALL_SNAPSHOTS = "All snapshots"
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -55,6 +57,18 @@ async def async_setup_entry(
                         policies=policies,
                     )
                 )
+
+    if categories.get("vms"):
+        for moref, vm_data in coordinator.data.get("vms", {}).items():
+            name = vm_data.get("name", moref)
+            entities.append(
+                VmSnapshotSelect(
+                    coordinator=coordinator,
+                    entry=entry,
+                    moref=moref,
+                    name=name,
+                )
+            )
 
     async_add_entities(entities)
 
@@ -111,3 +125,47 @@ class HostPowerPolicySelect(VSphereEntity, SelectEntity):
             await self.hass.async_add_executor_job(self._client.host_set_power_policy, self._moref, option)
         except VSphereOperationError as err:
             raise HomeAssistantError(f"Failed to set power policy on host {self._moref}: {err}") from err
+
+
+class VmSnapshotSelect(VSphereEntity, SelectEntity):
+    """Select entity listing VM snapshots for targeted removal."""
+
+    _attr_icon = "mdi:camera"
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        moref: str,
+        name: str,
+    ) -> None:
+        """Initialize the VM snapshot select."""
+        super().__init__(coordinator, entry, "vms", moref, name)
+        self._attr_unique_id = f"{entry.entry_id}_{moref}_snapshot_select"
+        self._attr_name = "Snapshot"
+        self._selected: str | None = None
+
+    @property
+    def options(self) -> list[str]:
+        """Return snapshot names plus an 'All snapshots' option."""
+        obj_data = self._get_data()
+        snapshots: list[dict[str, str]] = obj_data.get("snapshots", []) if obj_data else []
+        names = [s["name"] for s in snapshots]
+        names.append(_ALL_SNAPSHOTS)
+        return names
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected snapshot."""
+        opts = self.options
+        if self._selected and self._selected in opts:
+            return self._selected
+        # Default to most recent snapshot (last before "All snapshots")
+        if len(opts) > 1:
+            return opts[-2]
+        return None
+
+    async def async_select_option(self, option: str) -> None:
+        """Update the selected snapshot."""
+        self._selected = option
+        self.async_write_ha_state()

@@ -13,8 +13,6 @@ from .const import (
     DEFAULT_CATEGORIES,
     DOMAIN,
     SNAP_ALL,
-    SNAP_FIRST,
-    SNAP_LAST,
     HostAction,
     VmAction,
 )
@@ -70,9 +68,7 @@ async def async_setup_entry(
                 VmResetButton,
                 VmSuspendButton,
                 VmSnapshotCreateButton,
-                VmSnapshotRemoveAllButton,
-                VmSnapshotRemoveFirstButton,
-                VmSnapshotRemoveLastButton,
+                VmSnapshotRemoveButton,
             ):
                 entities.append(
                     button_cls(
@@ -302,11 +298,14 @@ class VmSnapshotCreateButton(_VSphereButton):
             raise HomeAssistantError(f"Failed to create snapshot for VM {self._moref}: {err}") from err
 
 
-class VmSnapshotRemoveAllButton(_VSphereButton):
-    """Button to remove all VM snapshots."""
+class VmSnapshotRemoveButton(_VSphereButton):
+    """Button to remove the snapshot selected in the Snapshot select entity.
 
-    _button_name = "Remove All Snapshots"
-    _unique_id_suffix = "vm_snapshot_remove_all"
+    If "All snapshots" is selected, removes all snapshots.
+    """
+
+    _button_name = "Remove Snapshot"
+    _unique_id_suffix = "vm_snapshot_remove"
     _attr_icon = "mdi:camera-off"
 
     def __init__(
@@ -322,68 +321,39 @@ class VmSnapshotRemoveAllButton(_VSphereButton):
         super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
 
     async def async_press(self) -> None:
-        """Remove all snapshots from the VM."""
+        """Remove the selected snapshot (or all)."""
         if not self._resolver.is_allowed("vms", self._moref, VmAction.SNAPSHOT_REMOVE):
             raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SNAPSHOT_REMOVE))
+
+        # Find the snapshot select entity for this VM to read its current selection
+        from .select import _ALL_SNAPSHOTS  # noqa: PLC0415
+
+        obj_data = self._get_data()
+        snapshots: list[dict[str, str]] = obj_data.get("snapshots", []) if obj_data else []
+
+        # Look up the VmSnapshotSelect entity to get the current selection
+        from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+        select_unique_id = f"{self._entry_id}_{self._moref}_snapshot_select"
+        selected: str | None = None
+        entity_reg = er.async_get(self.hass)
+        select_entity_id = entity_reg.async_get_entity_id("select", DOMAIN, select_unique_id)
+        if select_entity_id:
+            state = self.hass.states.get(select_entity_id)
+            if state:
+                selected = state.state
+
+        if not selected or selected in ("unknown", "unavailable", ""):
+            raise HomeAssistantError("No snapshot selected. Choose a snapshot from the Snapshot selector first.")
+
         try:
-            await self.hass.async_add_executor_job(self._client.remove_snapshot, self._moref, SNAP_ALL)
+            if selected == _ALL_SNAPSHOTS:
+                await self.hass.async_add_executor_job(self._client.remove_snapshot, self._moref, SNAP_ALL)
+            else:
+                # Find the moref for the selected snapshot name
+                snap_moref = next((s["moref"] for s in snapshots if s["name"] == selected), None)
+                if snap_moref is None:
+                    raise HomeAssistantError(f"Snapshot '{selected}' not found on VM {self._moref}")
+                await self.hass.async_add_executor_job(self._client.remove_snapshot_by_moref, self._moref, snap_moref)
         except VSphereOperationError as err:
-            raise HomeAssistantError(f"Failed to remove all snapshots for VM {self._moref}: {err}") from err
-
-
-class VmSnapshotRemoveFirstButton(_VSphereButton):
-    """Button to remove the first/oldest VM snapshot."""
-
-    _button_name = "Remove First Snapshot"
-    _unique_id_suffix = "vm_snapshot_remove_first"
-    _attr_icon = "mdi:camera-minus"
-
-    def __init__(
-        self,
-        coordinator: VSphereData,
-        entry: ConfigEntry,
-        moref: str,
-        name: str,
-        client: VSphereClient,
-        resolver: PermissionResolver,
-    ) -> None:
-        """Initialize."""
-        super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
-
-    async def async_press(self) -> None:
-        """Remove the oldest snapshot from the VM."""
-        if not self._resolver.is_allowed("vms", self._moref, VmAction.SNAPSHOT_REMOVE):
-            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SNAPSHOT_REMOVE))
-        try:
-            await self.hass.async_add_executor_job(self._client.remove_snapshot, self._moref, SNAP_FIRST)
-        except VSphereOperationError as err:
-            raise HomeAssistantError(f"Failed to remove first snapshot for VM {self._moref}: {err}") from err
-
-
-class VmSnapshotRemoveLastButton(_VSphereButton):
-    """Button to remove the last/newest VM snapshot."""
-
-    _button_name = "Remove Last Snapshot"
-    _unique_id_suffix = "vm_snapshot_remove_last"
-    _attr_icon = "mdi:camera-minus"
-
-    def __init__(
-        self,
-        coordinator: VSphereData,
-        entry: ConfigEntry,
-        moref: str,
-        name: str,
-        client: VSphereClient,
-        resolver: PermissionResolver,
-    ) -> None:
-        """Initialize."""
-        super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
-
-    async def async_press(self) -> None:
-        """Remove the newest snapshot from the VM."""
-        if not self._resolver.is_allowed("vms", self._moref, VmAction.SNAPSHOT_REMOVE):
-            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SNAPSHOT_REMOVE))
-        try:
-            await self.hass.async_add_executor_job(self._client.remove_snapshot, self._moref, SNAP_LAST)
-        except VSphereOperationError as err:
-            raise HomeAssistantError(f"Failed to remove last snapshot for VM {self._moref}: {err}") from err
+            raise HomeAssistantError(f"Failed to remove snapshot on VM {self._moref}: {err}") from err

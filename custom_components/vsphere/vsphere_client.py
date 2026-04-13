@@ -1025,6 +1025,29 @@ class VSphereClient:
         except vmodl.MethodFault as exc:
             raise VSphereOperationError(f"vSphere fault during remove_snapshot on VM {vm_moref}: {exc}") from exc
 
+    def remove_snapshot_by_moref(self, vm_moref: str, snapshot_moref: str) -> None:
+        """Remove a specific snapshot identified by its MoRef ID."""
+        try:
+            vm = self._get_vm_by_moref(vm_moref)
+            if not vm.snapshot:
+                raise VSphereOperationError(f"VM {vm_moref} has no snapshots")
+            flat = self._list_snapshots(vm.snapshot.rootSnapshotList, tree=True)
+            for snap_node in flat:
+                if str(snap_node.snapshot._moId) == snapshot_moref:  # noqa: SLF001
+                    task = snap_node.snapshot.RemoveSnapshot_Task(removeChildren=False)
+                    self._wait_for_task(task, f"remove snapshot '{snap_node.name}'")
+                    return
+            raise VSphereOperationError(f"Snapshot {snapshot_moref} not found on VM {vm_moref}")
+        except VSphereOperationError:
+            raise
+        except vim.fault.NoPermission as exc:
+            priv = getattr(exc, "privilegeId", "unknown")
+            raise VSphereOperationError(
+                f"Permission denied for remove_snapshot on VM {vm_moref}: missing vSphere privilege '{priv}'"
+            ) from exc
+        except vmodl.MethodFault as exc:
+            raise VSphereOperationError(f"vSphere fault during remove_snapshot on VM {vm_moref}: {exc}") from exc
+
     def vm_migrate(self, vm_moref: str, target_host_moref: str) -> None:
         """Migrate (vMotion) a VM to a target host."""
         self.ensure_poll_connection()

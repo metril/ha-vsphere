@@ -633,22 +633,22 @@ async def async_setup_entry(
 
     entities: list[VSphereSensor | VSpherePerfSensor | VSphereAlarmSensor] = []
 
-    # When performance monitoring is enabled, skip static sensors that are
-    # superseded by their realtime counterparts from the PerformanceManager.
+    # Skip static sensors that are superseded by more detailed alternatives.
+    # - Performance enabled: realtime perf sensors replace static CPU/memory usage
+    # - Storage Advanced enabled: Committed/Uncommitted/Unshared replace Used Space
     perf_enabled = bool(categories.get("performance"))
-    _perf_skip: dict[str, set[str]] = (
-        {
-            "hosts": {"cpu_usage_ghz", "mem_usage_gb"},
-            "vms": {"cpu_use_pct", "memory_active_mb"},
-        }
-        if perf_enabled
-        else {}
-    )
+    storage_advanced = bool(categories.get("storage_advanced"))
+    _skip: dict[str, set[str]] = {}
+    if perf_enabled:
+        _skip.setdefault("hosts", set()).update({"cpu_usage_ghz", "mem_usage_gb"})
+        _skip.setdefault("vms", set()).update({"cpu_use_pct", "memory_active_mb"})
+    if storage_advanced:
+        _skip.setdefault("vms", set()).add("used_space_gb")
 
     for category, (descriptions, data_key) in SENSOR_MAP.items():
         if not categories.get(category):
             continue
-        skip_keys = _perf_skip.get(data_key, set())
+        skip_keys = _skip.get(data_key, set())
         for moref, obj_data in coordinator.data.get(data_key, {}).items():
             name: str = obj_data.get("name", moref)
             for description in descriptions:
