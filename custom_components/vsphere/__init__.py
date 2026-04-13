@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -124,6 +125,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except VSphereConnectionError as err:
         await hass.async_add_executor_job(client.disconnect_poll)
         raise ConfigEntryNotReady(str(err)) from err
+
+    # Wait for initial data before setting up platforms (event listener
+    # pushes data from a background thread via call_soon_threadsafe)
+    try:
+        await asyncio.wait_for(coordinator.initial_data_ready.wait(), timeout=30)
+    except TimeoutError as err:
+        await hass.async_add_executor_job(event_listener.stop)
+        await hass.async_add_executor_job(client.disconnect_poll)
+        raise ConfigEntryNotReady("Timed out waiting for initial vSphere data") from err
 
     # ------------------------------------------------------------------
     # Optionally create the performance coordinator

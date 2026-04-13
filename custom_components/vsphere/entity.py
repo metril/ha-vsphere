@@ -161,16 +161,12 @@ class VSphereChildEntity(VSphereEntity):
 
     @property
     def available(self) -> bool:
-        """Entity is available if its data and parent exist in coordinator.
-
-        If the parent category has data, verify parent still exists.
-        If the parent category is empty (e.g., hosts disabled but network enabled),
-        skip the parent check — the child data alone determines availability.
-        """
+        """Entity is available if both its parent and child data exist in coordinator."""
         if not self.coordinator.data:
             return False
+        # Parent must exist (if parent category is disabled, parent won't be in data)
         parent_data = self.coordinator.data.get(self._object_type, {})
-        if parent_data and self._moref not in parent_data:
+        if self._moref not in parent_data:
             return False
         child_data = self.coordinator.data.get(self._data_category, {})
         return self._data_moref in child_data and CoordinatorEntity.available.fget(self)

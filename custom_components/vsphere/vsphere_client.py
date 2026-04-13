@@ -59,6 +59,7 @@ class VSphereClient:
 
         self._push_conn: Any = None
         self._poll_conn: Any = None
+        self._counter_cache: dict[str, int] | None = None
 
     # ------------------------------------------------------------------
     # Connection management
@@ -149,6 +150,7 @@ class VSphereClient:
             _LOGGER.debug("Poll connection lost; reconnecting", exc_info=True)
             self._disconnect(self._poll_conn)
             self._poll_conn = None
+            self._counter_cache = None
             self.connect_poll()
 
     # ------------------------------------------------------------------
@@ -633,7 +635,9 @@ class VSphereClient:
         return results
 
     def _get_counter_ids(self, perf_manager: Any) -> dict[str, int]:
-        """Build a mapping of counter name → counter ID."""
+        """Build a mapping of counter name → counter ID (cached per connection)."""
+        if self._counter_cache is not None:
+            return self._counter_cache
         counters = {}
         for counter in perf_manager.perfCounter:
             group = counter.groupInfo.key
@@ -641,6 +645,7 @@ class VSphereClient:
             rollup = counter.rollupType
             key = f"{group}.{name}.{rollup}"
             counters[key] = counter.key
+        self._counter_cache = counters
         return counters
 
     def _get_managed_object(self, obj_type: type, moref: str) -> Any | None:
@@ -772,19 +777,20 @@ class VSphereClient:
     # Snapshot helpers
     # ------------------------------------------------------------------
 
-    def _list_snapshots(
-        self,
-        snapshots: list[Any],
-        tree: bool = False,
-    ) -> list[Any]:
-        """Recursively traverse the snapshot tree and return a flat list."""
+    def _list_snapshot_objects(self, snapshots: list[Any]) -> list[Any]:
+        """Recursively collect snapshot ManagedObject references."""
         result: list[Any] = []
         for snap in snapshots or []:
-            if tree:
-                result.append(snap)
-            else:
-                result.append(snap.snapshot)
-            result.extend(self._list_snapshots(snap.childSnapshotList, tree=tree))
+            result.append(snap.snapshot)
+            result.extend(self._list_snapshot_objects(snap.childSnapshotList))
+        return result
+
+    def _list_snapshot_nodes(self, snapshots: list[Any]) -> list[Any]:
+        """Recursively collect snapshot tree nodes (with name, childSnapshotList, etc.)."""
+        result: list[Any] = []
+        for snap in snapshots or []:
+            result.append(snap)
+            result.extend(self._list_snapshot_nodes(snap.childSnapshotList))
         return result
 
     def get_vm_storage_details(self) -> dict[str, dict[str, Any]]:
@@ -993,7 +999,7 @@ class VSphereClient:
                 _LOGGER.debug("No snapshots on VM %s; nothing to remove", vm_moref)
                 return
 
-            flat = self._list_snapshots(snap_info.rootSnapshotList)
+            flat = self._list_snapshot_objects(snap_info.rootSnapshotList)
             if not flat:
                 _LOGGER.debug("Empty snapshot list on VM %s", vm_moref)
                 return
@@ -1031,7 +1037,7 @@ class VSphereClient:
             vm = self._get_vm_by_moref(vm_moref)
             if not vm.snapshot:
                 raise VSphereOperationError(f"VM {vm_moref} has no snapshots")
-            flat = self._list_snapshots(vm.snapshot.rootSnapshotList, tree=True)
+            flat = self._list_snapshot_nodes(vm.snapshot.rootSnapshotList)
             for snap_node in flat:
                 if str(snap_node.snapshot._moId) == snapshot_moref:  # noqa: SLF001
                     task = snap_node.snapshot.RemoveSnapshot_Task(removeChildren=False)
@@ -1560,7 +1566,7 @@ class VSphereClient:
             # Snapshot count
             snap_info = vm_obj.snapshot
             if snap_info:
-                data["snapshot_count"] = len(self._list_snapshots(snap_info.rootSnapshotList))
+                data["snapshot_count"] = len(self._list_snapshot_objects(snap_info.rootSnapshotList))
             else:
                 data["snapshot_count"] = 0
 

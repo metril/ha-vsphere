@@ -94,15 +94,6 @@ class PermissionResolver:
             return f"blocked: {reason}"
         return f"allowed: {reason}"
 
-    def _explain_category(self, category: str, action: str) -> str | None:
-        """Return a per-category explanation if a category-level rule applies."""
-        cat_restrictions = self._restrictions.get("categories", {}).get(category, {})
-        if action in cat_restrictions:
-            return f"{action} is disabled for all {category} (per-category restriction)"
-        if "_all" in cat_restrictions:
-            return f"All operations are disabled for all {category} (per-category blanket restriction)"
-        return None
-
     # ------------------------------------------------------------------
     # Internal resolution logic
     # ------------------------------------------------------------------

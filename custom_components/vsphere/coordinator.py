@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -60,6 +61,7 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
             "storage_advanced": {},
         }
         self.data = self._data
+        self.initial_data_ready = asyncio.Event()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """No-op — data is pushed by EventListener."""
@@ -89,6 +91,7 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         self._data.update(data)
         self.data = self._data
         self.async_set_updated_data(self._data)
+        self.initial_data_ready.set()
 
     def update_perf(self, perf_data: dict[str, Any]) -> None:
         """Update performance counter data."""
