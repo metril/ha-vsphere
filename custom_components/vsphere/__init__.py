@@ -141,7 +141,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     perf_coordinator: VSpherePerfCoordinator | None = None
     if categories.get(Category.PERFORMANCE, False):
         perf_coordinator = VSpherePerfCoordinator(hass, client, coordinator, entry)
-        await perf_coordinator.async_config_entry_first_refresh()
+        try:
+            await perf_coordinator.async_config_entry_first_refresh()
+        except ConfigEntryNotReady:
+            await hass.async_add_executor_job(event_listener.stop)
+            await hass.async_add_executor_job(client.disconnect_poll)
+            raise
 
     # ------------------------------------------------------------------
     # Store runtime objects in hass.data

@@ -137,7 +137,7 @@ class VSpherePerfCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             perf_data: dict[str, Any] = await self.hass.async_add_executor_job(self._fetch_performance)
             self._vsphere_data.update_perf(perf_data)
-            self._vsphere_data.async_set_updated_data(self._vsphere_data._data)  # noqa: SLF001
+            self._vsphere_data.async_update_listeners()
             return perf_data
         except VSphereAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
