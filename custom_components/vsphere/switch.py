@@ -13,6 +13,7 @@ from homeassistant.helpers.event import async_call_later
 from .const import (
     CONF_CATEGORIES,
     CONF_FORCE_ARM_TIMEOUT,
+    CONF_RESTRICTIONS,
     DEFAULT_CATEGORIES,
     DEFAULT_FORCE_ARM_TIMEOUT,
     DOMAIN,
@@ -203,7 +204,7 @@ class _ForceArmSwitch(VSphereEntity, SwitchEntity):
 
         self.hass.data[DOMAIN][self._entry_id]["armed"][self._moref] = True
 
-        timeout = self._entry.options.get(CONF_FORCE_ARM_TIMEOUT, DEFAULT_FORCE_ARM_TIMEOUT)
+        timeout = self._entry.options.get(CONF_RESTRICTIONS, {}).get(CONF_FORCE_ARM_TIMEOUT, DEFAULT_FORCE_ARM_TIMEOUT)
         self._disarm_cancel = async_call_later(self.hass, timeout, self._auto_disarm)
         self.async_write_ha_state()
 

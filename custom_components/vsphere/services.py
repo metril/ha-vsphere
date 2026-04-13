@@ -344,7 +344,9 @@ async def _handle_vm_migrate(call: ServiceCall) -> None:
 
 async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> None:
     """Remove one or more snapshots by name. Pass 'all' to remove all snapshots."""
-    client, _, entry_id, vm_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
+    client, resolver, entry_id, vm_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
+    if resolver is not None and not resolver.is_allowed("vms", vm_moref, VmAction.SNAPSHOT_REMOVE):
+        raise HomeAssistantError(resolver.explain("vms", vm_moref, VmAction.SNAPSHOT_REMOVE))
     snapshot_names: list[str] = call.data[ATTR_SNAPSHOTS]
 
     # Get snapshot data from coordinator

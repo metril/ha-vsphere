@@ -1563,12 +1563,20 @@ class VSphereClient:
             data["guest_ip"] = guest_summary.ipAddress if guest_summary and guest_summary.ipAddress else ""
             data["guest_os"] = guest_summary.guestFullName if guest_summary and guest_summary.guestFullName else ""
 
-            # Snapshot count
+            # Snapshot count and list
             snap_info = vm_obj.snapshot
             if snap_info:
-                data["snapshot_count"] = len(self._list_snapshot_objects(snap_info.rootSnapshotList))
+                nodes = self._list_snapshot_nodes(snap_info.rootSnapshotList)
+                data["snapshot_count"] = len(nodes)
+                data["snapshots"] = []
+                for sn in nodes:
+                    with contextlib.suppress(Exception):
+                        data["snapshots"].append(
+                            {"name": sn.name, "moref": str(sn.snapshot._moId)}  # noqa: SLF001
+                        )
             else:
                 data["snapshot_count"] = 0
+                data["snapshots"] = []
 
         except Exception:  # noqa: BLE001
             _LOGGER.debug("Error parsing VM %s", moref, exc_info=True)
