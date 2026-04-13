@@ -58,8 +58,7 @@
                             "storage_advanced": "Advanced Storage",
                             "performance": "Performance Metrics",
                             "events_alarms": "Events & Alarms",
-                            "perf_interval": "Performance polling interval",
-                            "force_arm_timeout": "Force power arm timeout"
+                            "perf_interval": "Performance polling interval"
                         },
                         "data_description": {
                             "clusters": "Monitor DRS and HA cluster status",
@@ -68,8 +67,7 @@
                             "storage_advanced": "Per-VM disk and storage policy details",
                             "performance": "Real-time CPU/memory/disk/network metrics (polled)",
                             "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour",
-                            "force_arm_timeout": "How long the force power arm switch stays armed before auto-disarming (seconds)"
+                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour"
                         }
                     }
                 }
@@ -117,13 +115,15 @@
                     "block_destructive": "Block destructive operations",
                     "block_snapshots": "Block all snapshot operations",
                     "block_migrate": "Block VM migration",
-                    "block_host_ops": "Block all host operations"
+                    "block_host_ops": "Block all host operations",
+                    "force_arm_timeout": "Force power arm timeout"
                 },
                 "data_description": {
                     "block_destructive": "Blocks: power off, shutdown, hard reset, and snapshot removal",
                     "block_snapshots": "Blocks: snapshot creation and removal",
                     "block_migrate": "Blocks: VM migration (vMotion) between hosts",
-                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes"
+                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes",
+                    "force_arm_timeout": "How long the Force Power (Arm) switch stays armed before auto-disarming (seconds)"
                 }
             },
             "vm_select": {
@@ -263,8 +263,7 @@
                             "storage_advanced": "Advanced Storage",
                             "performance": "Performance Metrics",
                             "events_alarms": "Events & Alarms",
-                            "perf_interval": "Performance polling interval",
-                            "force_arm_timeout": "Force power arm timeout"
+                            "perf_interval": "Performance polling interval"
                         },
                         "data_description": {
                             "clusters": "Monitor DRS and HA cluster status",
@@ -273,8 +272,7 @@
                             "storage_advanced": "Per-VM disk and storage policy details",
                             "performance": "Real-time CPU/memory/disk/network metrics (polled)",
                             "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour",
-                            "force_arm_timeout": "How long the force power arm switch stays armed before auto-disarming (seconds)"
+                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour"
                         }
                     }
                 }
@@ -312,13 +310,15 @@
                     "block_destructive": "Block destructive operations",
                     "block_snapshots": "Block all snapshot operations",
                     "block_migrate": "Block VM migration",
-                    "block_host_ops": "Block all host operations"
+                    "block_host_ops": "Block all host operations",
+                    "force_arm_timeout": "Force power arm timeout"
                 },
                 "data_description": {
                     "block_destructive": "Blocks: power off, shutdown, hard reset, and snapshot removal",
                     "block_snapshots": "Blocks: snapshot creation and removal",
                     "block_migrate": "Blocks: VM migration (vMotion) between hosts",
-                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes"
+                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes",
+                    "force_arm_timeout": "How long the Force Power (Arm) switch stays armed before auto-disarming (seconds)"
                 }
             },
             "vm_select": {
