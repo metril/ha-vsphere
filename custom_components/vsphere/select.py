@@ -156,13 +156,14 @@ class VmSnapshotSelect(VSphereEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        """Return the currently selected snapshot."""
+        """Return the currently selected snapshot.
+
+        Does NOT auto-default to avoid silently targeting the wrong snapshot
+        for destructive removal operations after data refreshes.
+        """
         opts = self.options
         if self._selected and self._selected in opts:
             return self._selected
-        # Default to most recent snapshot (last before "All snapshots")
-        if len(opts) > 1:
-            return opts[-2]
         return None
 
     async def async_select_option(self, option: str) -> None:

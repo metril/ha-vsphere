@@ -142,17 +142,18 @@ class VmPowerSwitch(VSphereEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Shut down the VM (graceful or hard depending on arm state)."""
+        from . import clear_armed, is_armed  # noqa: PLC0415
+
         if not self._resolver.is_allowed("vms", self._moref, VmAction.POWER_OFF):
             raise HomeAssistantError(f"Power off is not allowed for VM {self._moref}")
-        armed_dict: dict[str, bool] = self.hass.data[DOMAIN][self._entry_id]["armed"]
-        armed = armed_dict.get(self._moref, False)
+        armed = is_armed(self.hass, self._entry_id, self._moref)
         action = "power_off" if armed else "shutdown"
         try:
             await self.hass.async_add_executor_job(self._client.vm_power, self._moref, action)
         except VSphereOperationError as err:
             raise HomeAssistantError(f"Failed to power off VM {self._moref}: {err}") from err
         if armed:
-            armed_dict.pop(self._moref, None)
+            clear_armed(self.hass, self._entry_id, self._moref)
         self._attr_is_on = False
         self.async_write_ha_state()
 

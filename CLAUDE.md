@@ -7,21 +7,21 @@ Home Assistant custom integration for VMware vSphere monitoring and control.
 
 ```
 custom_components/vsphere/
-├── __init__.py          (196)  Entry setup/teardown
-├── const.py             (143)  Constants, enums
+├── __init__.py          (281)  Entry setup/teardown, startup sync, entity cleanup, armed helpers
+├── const.py             (142)  Constants, enums
 ├── exceptions.py         (19)  VSphereError hierarchy
-├── permissions.py       (180)  7-step resolution chain (user restrictions only)
-├── vsphere_client.py  (1,510)  ALL pyVmomi interaction (only file importing pyVmomi)
-├── coordinator.py       (153)  VSphereData (push) + VSpherePerfCoordinator (poll)
-├── event_listener.py    (572)  PropertyCollector push thread + translation maps
-├── entity.py            (182)  Base entity + child entity + device hierarchy
-├── config_flow.py       (609)  4-step config + 3-step options + reauth + reconfigure
-├── sensor.py            (885)  63 sensor descriptions across 15 groups
-├── binary_sensor.py     (319)  11 binary sensor descriptions
-├── switch.py            (189)  VM power + host maintenance mode
-├── button.py            (373)  7 button classes with press-time permission checks
-├── select.py            (114)  Host power policy selector
-├── services.py          (410)  8 service handlers with device resolution
+├── permissions.py       (186)  7-step resolution chain (user restrictions only)
+├── vsphere_client.py  (1,577)  ALL pyVmomi interaction (only file importing pyVmomi)
+├── coordinator.py       (156)  VSphereData (push) + VSpherePerfCoordinator (poll) + startup event
+├── event_listener.py    (578)  PropertyCollector push thread + translation maps + snapshot flatten
+├── entity.py            (178)  Base entity + child entity + device hierarchy
+├── config_flow.py       (901)  Menu-driven options + config + reauth + reconfigure + restriction mixin
+├── sensor.py            (905)  Sensor descriptions with conditional skip (perf, storage)
+├── binary_sensor.py     (312)  Binary sensor descriptions
+├── switch.py            (307)  VM power + host maintenance + force arm switches
+├── button.py            (361)  Button classes with snapshot select integration
+├── select.py            (171)  Host power policy + VM snapshot selector
+├── services.py          (563)  Service handlers with shared helpers
 ├── diagnostics.py        (29)  Credential redaction
 ├── services.yaml               Service definitions for HA
 ├── manifest.json               Integration metadata

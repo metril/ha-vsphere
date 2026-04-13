@@ -1333,7 +1333,7 @@ class VSphereClient:
         self,
         categories: dict[str, bool],
         entity_filter: dict[str, Any],  # noqa: ARG002  # reserved for future per-object filtering
-    ) -> tuple[Any, Any]:
+    ) -> tuple[Any, Any, list[Any]]:
         """Create a PropertyCollector filter for the EventListener.
 
         Uses ContainerView for each object type so the traversal is fully

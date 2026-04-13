@@ -180,6 +180,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def is_armed(hass: HomeAssistant, entry_id: str, moref: str) -> bool:
+    """Check if a VM/host force power mode is armed."""
+    return hass.data.get(DOMAIN, {}).get(entry_id, {}).get("armed", {}).get(moref, False)
+
+
+def clear_armed(hass: HomeAssistant, entry_id: str, moref: str) -> None:
+    """Clear the armed state for a VM/host."""
+    hass.data.get(DOMAIN, {}).get(entry_id, {}).get("armed", {}).pop(moref, None)
+
+
 def _async_cleanup_stale_entities(
     hass: HomeAssistant,
     entry: ConfigEntry,

@@ -164,10 +164,11 @@ class VSphereChildEntity(VSphereEntity):
         """Entity is available if both its parent and child data exist in coordinator."""
         if not self.coordinator.data:
             return False
-        # Parent must exist (if parent category is disabled, parent won't be in data)
-        parent_data = self.coordinator.data.get(self._object_type, {})
-        if self._moref not in parent_data:
-            return False
+        # Root-parented entities (e.g., licenses) have no parent row in coordinator data
+        if self._object_type != "root":
+            parent_data = self.coordinator.data.get(self._object_type, {})
+            if self._moref not in parent_data:
+                return False
         child_data = self.coordinator.data.get(self._data_category, {})
         return self._data_moref in child_data and CoordinatorEntity.available.fget(self)
 

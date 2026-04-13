@@ -194,161 +194,147 @@ def _resolve_device(hass: HomeAssistant, device_id: str) -> tuple[Any, Any, str,
 
 
 # ---------------------------------------------------------------------------
+# Service handler helper
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_and_call(
+    hass: HomeAssistant,
+    device_id: str,
+    category: str | None,
+    action: str | None,
+    call_fn: Any,
+) -> tuple[Any, Any, str, str]:
+    """Resolve device, check permission, call a function.
+
+    ``call_fn`` receives ``(client, moref)`` and should return the
+    awaitable executor job.  Returns ``(client, resolver, entry_id, moref)``.
+    """
+    client, resolver, entry_id, moref = _resolve_device(hass, device_id)
+    if category and action and resolver is not None and not resolver.is_allowed(category, moref, action):
+        raise HomeAssistantError(resolver.explain(category, moref, action))
+    try:
+        await call_fn(client, moref)
+    except VSphereOperationError as err:
+        raise HomeAssistantError(str(err)) from err
+    return client, resolver, entry_id, moref
+
+
+# ---------------------------------------------------------------------------
 # Service handlers
 # ---------------------------------------------------------------------------
 
 
 async def _handle_vm_power(call: ServiceCall) -> None:
     """Handle the vm_power service call."""
-    hass = call.hass
-    device_id: str = call.data[ATTR_DEVICE_ID]
-    action: str = call.data[ATTR_ACTION]
-
-    client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
-
-    if resolver is not None and not resolver.is_allowed("vms", moref, action):
-        raise HomeAssistantError(resolver.explain("vms", moref, action))
-
-    try:
-        await hass.async_add_executor_job(client.vm_power, moref, action)
-    except VSphereOperationError as err:
-        raise HomeAssistantError(str(err)) from err
+    action = call.data[ATTR_ACTION]
+    await _resolve_and_call(
+        call.hass,
+        call.data[ATTR_DEVICE_ID],
+        "vms",
+        action,
+        lambda c, m: call.hass.async_add_executor_job(c.vm_power, m, action),
+    )
 
 
 async def _handle_host_power(call: ServiceCall) -> None:
     """Handle the host_power service call."""
-    hass = call.hass
-    device_id: str = call.data[ATTR_DEVICE_ID]
-    action: str = call.data[ATTR_ACTION]
-    force: bool = call.data.get(ATTR_FORCE, False)
-
-    client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
-
-    if resolver is not None and not resolver.is_allowed("hosts", moref, action):
-        raise HomeAssistantError(resolver.explain("hosts", moref, action))
-
-    try:
-        await hass.async_add_executor_job(client.host_power, moref, action, force)
-    except VSphereOperationError as err:
-        raise HomeAssistantError(str(err)) from err
+    action = call.data[ATTR_ACTION]
+    force = call.data.get(ATTR_FORCE, False)
+    await _resolve_and_call(
+        call.hass,
+        call.data[ATTR_DEVICE_ID],
+        "hosts",
+        action,
+        lambda c, m: call.hass.async_add_executor_job(c.host_power, m, action, force),
+    )
 
 
 async def _handle_host_power_policy(call: ServiceCall) -> None:
     """Handle the host_power_policy service call."""
-    hass = call.hass
-    device_id: str = call.data[ATTR_DEVICE_ID]
-    policy: str = call.data[ATTR_POLICY]
-
-    client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
-
-    if resolver is not None and not resolver.is_allowed("hosts", moref, HostAction.POWER_POLICY):
-        raise HomeAssistantError(resolver.explain("hosts", moref, HostAction.POWER_POLICY))
-
-    try:
-        await hass.async_add_executor_job(client.host_set_power_policy, moref, policy)
-    except VSphereOperationError as err:
-        raise HomeAssistantError(str(err)) from err
+    policy = call.data[ATTR_POLICY]
+    await _resolve_and_call(
+        call.hass,
+        call.data[ATTR_DEVICE_ID],
+        "hosts",
+        HostAction.POWER_POLICY,
+        lambda c, m: call.hass.async_add_executor_job(c.host_set_power_policy, m, policy),
+    )
 
 
 async def _handle_host_maintenance_mode(call: ServiceCall) -> None:
     """Handle the host_maintenance_mode service call."""
-    hass = call.hass
-    device_id: str = call.data[ATTR_DEVICE_ID]
-    enable: bool = call.data[ATTR_ENABLE]
-
-    client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
-
-    if resolver is not None and not resolver.is_allowed("hosts", moref, HostAction.MAINTENANCE):
-        raise HomeAssistantError(resolver.explain("hosts", moref, HostAction.MAINTENANCE))
-
-    try:
-        await hass.async_add_executor_job(client.host_set_maintenance_mode, moref, enable)
-    except VSphereOperationError as err:
-        raise HomeAssistantError(str(err)) from err
+    enable = call.data[ATTR_ENABLE]
+    await _resolve_and_call(
+        call.hass,
+        call.data[ATTR_DEVICE_ID],
+        "hosts",
+        HostAction.MAINTENANCE,
+        lambda c, m: call.hass.async_add_executor_job(c.host_set_maintenance_mode, m, enable),
+    )
 
 
 async def _handle_create_snapshot(call: ServiceCall) -> None:
     """Handle the create_snapshot service call."""
-    hass = call.hass
-    device_id: str = call.data[ATTR_DEVICE_ID]
-    name: str | None = call.data.get(ATTR_NAME)
-    description: str | None = call.data.get(ATTR_DESCRIPTION)
-    memory: bool = call.data.get(ATTR_MEMORY, False)
-    quiesce: bool = call.data.get(ATTR_QUIESCE, False)
-
-    client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
-
-    if resolver is not None and not resolver.is_allowed("vms", moref, VmAction.SNAPSHOT_CREATE):
-        raise HomeAssistantError(resolver.explain("vms", moref, VmAction.SNAPSHOT_CREATE))
-
-    try:
-        await hass.async_add_executor_job(client.create_snapshot, moref, name, description, memory, quiesce)
-    except VSphereOperationError as err:
-        raise HomeAssistantError(str(err)) from err
+    d = call.data
+    await _resolve_and_call(
+        call.hass,
+        d[ATTR_DEVICE_ID],
+        "vms",
+        VmAction.SNAPSHOT_CREATE,
+        lambda c, m: call.hass.async_add_executor_job(
+            c.create_snapshot,
+            m,
+            d.get(ATTR_NAME),
+            d.get(ATTR_DESCRIPTION),
+            d.get(ATTR_MEMORY, False),
+            d.get(ATTR_QUIESCE, False),
+        ),
+    )
 
 
 async def _handle_remove_snapshot(call: ServiceCall) -> None:
     """Handle the remove_snapshot service call."""
-    hass = call.hass
-    device_id: str = call.data[ATTR_DEVICE_ID]
-    which: str = call.data[ATTR_WHICH]
-
-    client, resolver, _entry_id, moref = _resolve_device(hass, device_id)
-
-    if resolver is not None and not resolver.is_allowed("vms", moref, VmAction.SNAPSHOT_REMOVE):
-        raise HomeAssistantError(resolver.explain("vms", moref, VmAction.SNAPSHOT_REMOVE))
-
-    try:
-        await hass.async_add_executor_job(client.remove_snapshot, moref, which)
-    except VSphereOperationError as err:
-        raise HomeAssistantError(str(err)) from err
+    which = call.data[ATTR_WHICH]
+    await _resolve_and_call(
+        call.hass,
+        call.data[ATTR_DEVICE_ID],
+        "vms",
+        VmAction.SNAPSHOT_REMOVE,
+        lambda c, m: call.hass.async_add_executor_job(c.remove_snapshot, m, which),
+    )
 
 
 async def _handle_list_hosts(call: ServiceCall) -> dict[str, Any]:
     """Handle the list_hosts service call."""
-    hass = call.hass
-    device_id: str = call.data[ATTR_DEVICE_ID]
-
-    client, _resolver, _entry_id, _moref = _resolve_device(hass, device_id)
-
+    client, _, _, _ = _resolve_device(call.hass, call.data[ATTR_DEVICE_ID])
     try:
-        hosts = await hass.async_add_executor_job(client.list_hosts)
+        hosts = await call.hass.async_add_executor_job(client.list_hosts)
     except VSphereOperationError as err:
         raise HomeAssistantError(str(err)) from err
-
     return {"hosts": hosts}
 
 
 async def _handle_list_power_policies(call: ServiceCall) -> dict[str, Any]:
     """Handle the list_power_policies service call."""
-    hass = call.hass
-    device_id: str = call.data[ATTR_DEVICE_ID]
-
-    client, _resolver, _entry_id, moref = _resolve_device(hass, device_id)
-
+    client, _, _, moref = _resolve_device(call.hass, call.data[ATTR_DEVICE_ID])
     try:
-        policies = await hass.async_add_executor_job(client.list_power_policies, moref)
+        policies = await call.hass.async_add_executor_job(client.list_power_policies, moref)
     except VSphereOperationError as err:
         raise HomeAssistantError(str(err)) from err
-
     return {"policies": policies}
 
 
 async def _handle_vm_migrate(call: ServiceCall) -> None:
     """Handle the vm_migrate service call."""
-    hass = call.hass
-    client, resolver, _entry_id, vm_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
-
-    if resolver is not None and not resolver.is_allowed("vms", vm_moref, "migrate"):
-        raise HomeAssistantError(resolver.explain("vms", vm_moref, "migrate"))
-
-    # Resolve target host device_id to moref
-    _, _, _, host_moref = _resolve_device(hass, call.data["target_host"])
-
-    try:
-        await hass.async_add_executor_job(client.vm_migrate, vm_moref, host_moref)
-    except VSphereOperationError as err:
-        raise HomeAssistantError(str(err)) from err
+    _, _, _, host_moref = _resolve_device(call.hass, call.data["target_host"])
+    await _resolve_and_call(
+        call.hass,
+        call.data[ATTR_DEVICE_ID],
+        "vms",
+        "migrate",
+        lambda c, m: call.hass.async_add_executor_job(c.vm_migrate, m, host_moref),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +349,7 @@ async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> No
 
     # Get snapshot data from coordinator
     coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
-    vm_data = coordinator.data.get("vms", {}).get(vm_moref, {})
+    vm_data = (coordinator.data or {}).get("vms", {}).get(vm_moref, {})
     snapshots: list[dict[str, str]] = vm_data.get("snapshots", [])
 
     for snap_name in snapshot_names:
@@ -388,46 +374,53 @@ async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> No
 # ---------------------------------------------------------------------------
 
 
-async def _handle_vm_force_power_off(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Force hard power off a VM, bypassing arm check when confirm=True."""
-    client, _, entry_id, vm_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
-    if not call.data[ATTR_CONFIRM]:
-        armed = hass.data[DOMAIN][entry_id]["armed"].get(vm_moref, False)
-        if not armed:
-            raise HomeAssistantError("Force power off is not armed. Set confirm=true or arm the switch first.")
+async def _handle_force_operation(
+    hass: HomeAssistant,
+    call: ServiceCall,
+    error_label: str,
+    call_fn: Any,
+) -> None:
+    """Shared logic for force power services (arm check + execute + disarm)."""
+    from . import clear_armed, is_armed  # noqa: PLC0415
+
+    client, _, entry_id, moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
+    if not call.data[ATTR_CONFIRM] and not is_armed(hass, entry_id, moref):
+        raise HomeAssistantError(f"{error_label} is not armed. Set confirm=true or arm the switch first.")
     try:
-        await hass.async_add_executor_job(client.vm_power, vm_moref, "power_off")
+        await call_fn(hass, client, moref)
     except VSphereOperationError as err:
         raise HomeAssistantError(str(err)) from err
-    hass.data[DOMAIN][entry_id]["armed"].pop(vm_moref, None)
+    clear_armed(hass, entry_id, moref)
+
+
+async def _handle_vm_force_power_off(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Force hard power off a VM."""
+    await _handle_force_operation(
+        hass,
+        call,
+        "Force power off",
+        lambda h, c, m: h.async_add_executor_job(c.vm_power, m, "power_off"),
+    )
 
 
 async def _handle_host_force_shutdown(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Force shutdown a host, bypassing arm check when confirm=True."""
-    client, _, entry_id, host_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
-    if not call.data[ATTR_CONFIRM]:
-        armed = hass.data[DOMAIN][entry_id]["armed"].get(host_moref, False)
-        if not armed:
-            raise HomeAssistantError("Force shutdown is not armed. Set confirm=true or arm the switch first.")
-    try:
-        await hass.async_add_executor_job(client.host_power, host_moref, "shutdown", True)
-    except VSphereOperationError as err:
-        raise HomeAssistantError(str(err)) from err
-    hass.data[DOMAIN][entry_id]["armed"].pop(host_moref, None)
+    """Force shutdown a host."""
+    await _handle_force_operation(
+        hass,
+        call,
+        "Force shutdown",
+        lambda h, c, m: h.async_add_executor_job(c.host_power, m, "shutdown", True),
+    )
 
 
 async def _handle_host_force_reboot(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Force reboot a host, bypassing arm check when confirm=True."""
-    client, _, entry_id, host_moref = _resolve_device(hass, call.data[ATTR_DEVICE_ID])
-    if not call.data[ATTR_CONFIRM]:
-        armed = hass.data[DOMAIN][entry_id]["armed"].get(host_moref, False)
-        if not armed:
-            raise HomeAssistantError("Force reboot is not armed. Set confirm=true or arm the switch first.")
-    try:
-        await hass.async_add_executor_job(client.host_power, host_moref, "reboot", True)
-    except VSphereOperationError as err:
-        raise HomeAssistantError(str(err)) from err
-    hass.data[DOMAIN][entry_id]["armed"].pop(host_moref, None)
+    """Force reboot a host."""
+    await _handle_force_operation(
+        hass,
+        call,
+        "Force reboot",
+        lambda h, c, m: h.async_add_executor_job(c.host_power, m, "reboot", True),
+    )
 
 
 # ---------------------------------------------------------------------------

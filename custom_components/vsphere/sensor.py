@@ -648,7 +648,7 @@ async def async_setup_entry(
     for category, (descriptions, data_key) in SENSOR_MAP.items():
         if not categories.get(category):
             continue
-        skip_keys = _skip.get(data_key, set())
+        skip_keys = _skip.get(category, set())
         for moref, obj_data in coordinator.data.get(data_key, {}).items():
             name: str = obj_data.get("name", moref)
             for description in descriptions:

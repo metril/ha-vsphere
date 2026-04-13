@@ -134,16 +134,17 @@ class HostShutdownButton(_VSphereButton):
 
     async def async_press(self) -> None:
         """Shut down the host (graceful or forced depending on arm state)."""
+        from . import clear_armed, is_armed  # noqa: PLC0415
+
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.SHUTDOWN):
             raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.SHUTDOWN))
-        armed_dict: dict[str, bool] = self.hass.data[DOMAIN][self._entry_id]["armed"]
-        armed = armed_dict.get(self._moref, False)
+        armed = is_armed(self.hass, self._entry_id, self._moref)
         try:
             await self.hass.async_add_executor_job(self._client.host_power, self._moref, "shutdown", armed)
         except VSphereOperationError as err:
             raise HomeAssistantError(f"Failed to shut down host {self._moref}: {err}") from err
         if armed:
-            armed_dict.pop(self._moref, None)
+            clear_armed(self.hass, self._entry_id, self._moref)
 
 
 class HostRebootButton(_VSphereButton):
@@ -168,16 +169,17 @@ class HostRebootButton(_VSphereButton):
 
     async def async_press(self) -> None:
         """Reboot the host (graceful or forced depending on arm state)."""
+        from . import clear_armed, is_armed  # noqa: PLC0415
+
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.REBOOT):
             raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.REBOOT))
-        armed_dict: dict[str, bool] = self.hass.data[DOMAIN][self._entry_id]["armed"]
-        armed = armed_dict.get(self._moref, False)
+        armed = is_armed(self.hass, self._entry_id, self._moref)
         try:
             await self.hass.async_add_executor_job(self._client.host_power, self._moref, "reboot", armed)
         except VSphereOperationError as err:
             raise HomeAssistantError(f"Failed to reboot host {self._moref}: {err}") from err
         if armed:
-            armed_dict.pop(self._moref, None)
+            clear_armed(self.hass, self._entry_id, self._moref)
 
 
 class VmRebootButton(_VSphereButton):
