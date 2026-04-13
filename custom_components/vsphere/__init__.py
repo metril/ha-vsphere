@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import Platform
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_CATEGORIES,
@@ -150,6 +152,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # ------------------------------------------------------------------
+    # Clean up stale entities/devices from disabled categories or removed objects
+    # ------------------------------------------------------------------
+    _async_cleanup_stale_entities(hass, entry, coordinator, categories)
+
+    # ------------------------------------------------------------------
     # Register services (once, regardless of entry count)
     # ------------------------------------------------------------------
     if len(hass.data[DOMAIN]) == 1:
@@ -161,6 +168,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
+
+
+def _async_cleanup_stale_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: VSphereData,
+    categories: dict[str, bool],
+) -> None:
+    """Remove entities and devices for disabled categories or removed objects.
+
+    Compares registered entities against the current coordinator data and
+    enabled categories.  Any entity whose moref is no longer valid is removed
+    from the entity registry, and devices left with no entities are removed
+    from the device registry.
+    """
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+
+    # Build the set of morefs that should have entities right now
+    valid_morefs: set[str] = {entry.entry_id}  # root device
+    for cat_key in ("hosts", "vms", "datastores", "clusters", "resource_pools"):
+        if categories.get(cat_key):
+            valid_morefs.update(coordinator.data.get(cat_key, {}).keys())
+    if categories.get("network"):
+        valid_morefs.update(coordinator.data.get("networks", {}).keys())
+    if categories.get("storage_advanced"):
+        valid_morefs.update(coordinator.data.get("storage_advanced", {}).keys())
+    if categories.get("licenses"):
+        valid_morefs.update(coordinator.data.get("licenses", {}).keys())
+    if categories.get("events_alarms"):
+        # Alarm entities are on host/VM morefs (already in valid_morefs if those categories enabled)
+        for cat_key in ("hosts", "vms"):
+            if categories.get(cat_key):
+                valid_morefs.update(coordinator.data.get(cat_key, {}).keys())
+
+    # Remove entities whose moref is no longer valid
+    prefix = f"{entry.entry_id}_"
+    for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        uid = ent.unique_id
+        if not uid.startswith(prefix):
+            continue
+        remainder = uid[len(prefix) :]
+        # Check if any valid moref is a prefix of the remainder
+        # (morefs like "host-42" can contain hyphens/numbers)
+        moref_found = any(remainder.startswith(m + "_") or remainder == m for m in valid_morefs)
+        if not moref_found:
+            ent_reg.async_remove(ent.entity_id)
+
+    # Remove devices with no remaining entities
+    for dev in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        if not er.async_entries_for_device(ent_reg, dev.id):
+            dev_reg.async_remove_device(dev.id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
