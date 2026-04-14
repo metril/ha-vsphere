@@ -147,9 +147,11 @@ class VmSnapshotSelect(VSphereEntity, SelectEntity):
 
     @property
     def options(self) -> list[str]:
-        """Return snapshot names plus an 'All snapshots' option."""
+        """Return snapshot names plus 'All snapshots', or empty when none exist."""
         obj_data = self._get_data()
         snapshots: list[dict[str, str]] = obj_data.get("snapshots", []) if obj_data else []
+        if not snapshots:
+            return []
         names = [s["name"] for s in snapshots]
         names.append(_ALL_SNAPSHOTS)
         return names
