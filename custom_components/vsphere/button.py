@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
+from homeassistant.components.button import ButtonEntity
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
@@ -13,7 +13,7 @@ from .const import (
     DEFAULT_CATEGORIES,
     DOMAIN,
     SNAP_ALL,
-    HostAction,
+    SNAP_SELECT_ALL,
     VmAction,
 )
 from .entity import VSphereEntity
@@ -48,25 +48,22 @@ async def async_setup_entry(
     if categories.get("hosts"):
         for moref, host_data in coordinator.data.get("hosts", {}).items():
             name: str = host_data.get("name", moref)
-            for host_button_cls in (HostShutdownButton, HostRebootButton):
-                entities.append(
-                    host_button_cls(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
+            entities.append(
+                HostPowerExecuteButton(
+                    coordinator=coordinator,
+                    entry=entry,
+                    moref=moref,
+                    name=name,
+                    client=client,
+                    resolver=resolver,
                 )
+            )
 
     if categories.get("vms"):
         for moref, vm_data in coordinator.data.get("vms", {}).items():
             name = vm_data.get("name", moref)
             for button_cls in (
-                VmRebootButton,
-                VmResetButton,
-                VmSuspendButton,
+                VmPowerExecuteButton,
                 VmSnapshotCreateButton,
                 VmSnapshotRemoveButton,
             ):
@@ -111,12 +108,78 @@ class _VSphereButton(VSphereEntity, ButtonEntity):
         raise NotImplementedError
 
 
-class HostShutdownButton(_VSphereButton):
-    """Button to shut down a host."""
+# ---------------------------------------------------------------------------
+# Power execute buttons (read from power operation select)
+# ---------------------------------------------------------------------------
 
-    _attr_translation_key = "host_shutdown"
-    _unique_id_suffix = "host_shutdown"
-    _attr_icon = "mdi:power"
+
+class _PowerExecuteButton(_VSphereButton):
+    """Base class for power execute buttons that read from a power operation select."""
+
+    _attr_icon = "mdi:play-circle"
+    _select_suffix: str  # Override in subclass: "vm_power_operation" or "host_power_operation"
+
+    def _read_power_select(self) -> str | None:
+        """Read the current selection from the power operation select entity."""
+        from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+        select_unique_id = f"{self._entry_id}_{self._moref}_{self._select_suffix}"
+        entity_reg = er.async_get(self.hass)
+        select_entity_id = entity_reg.async_get_entity_id("select", DOMAIN, select_unique_id)
+        if select_entity_id:
+            state = self.hass.states.get(select_entity_id)
+            if state and state.state not in ("unknown", "unavailable", ""):
+                return state.state
+        return None
+
+
+class VmPowerExecuteButton(_PowerExecuteButton):
+    """Button to execute the selected VM power operation."""
+
+    _attr_translation_key = "vm_power_execute"
+    _unique_id_suffix = "vm_power_execute"
+    _select_suffix = "vm_power_operation"
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        moref: str,
+        name: str,
+        client: VSphereClient,
+        resolver: PermissionResolver,
+    ) -> None:
+        """Initialize."""
+        super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
+
+    async def async_press(self) -> None:
+        """Execute the selected VM power operation."""
+        from .select import VM_POWER_OPERATIONS  # noqa: PLC0415
+
+        selected = self._read_power_select()
+        if not selected:
+            raise HomeAssistantError(
+                "No power operation selected. Choose an operation from the Power (Operation) selector first."
+            )
+
+        if selected not in VM_POWER_OPERATIONS:
+            raise HomeAssistantError(f"Unknown power operation: {selected}")
+
+        action_enum, client_action = VM_POWER_OPERATIONS[selected]
+        if not self._resolver.is_allowed("vms", self._moref, action_enum):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, action_enum))
+        try:
+            await self.hass.async_add_executor_job(self._client.vm_power, self._moref, client_action)
+        except VSphereOperationError as err:
+            raise HomeAssistantError(f"Failed to execute {selected} on VM {self._moref}: {err}") from err
+
+
+class HostPowerExecuteButton(_PowerExecuteButton):
+    """Button to execute the selected host power operation."""
+
+    _attr_translation_key = "host_power_execute"
+    _unique_id_suffix = "host_power_execute"
+    _select_suffix = "host_power_operation"
 
     def __init__(
         self,
@@ -131,142 +194,30 @@ class HostShutdownButton(_VSphereButton):
         super().__init__(coordinator, entry, "hosts", moref, name, client, resolver)
 
     async def async_press(self) -> None:
-        """Shut down the host (graceful or forced depending on arm state)."""
-        from . import clear_armed, is_armed  # noqa: PLC0415
+        """Execute the selected host power operation."""
+        from .select import HOST_POWER_OPERATIONS  # noqa: PLC0415
 
-        if not self._resolver.is_allowed("hosts", self._moref, HostAction.SHUTDOWN):
-            raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.SHUTDOWN))
-        armed = is_armed(self.hass, self._entry_id, self._moref)
+        selected = self._read_power_select()
+        if not selected:
+            raise HomeAssistantError(
+                "No power operation selected. Choose an operation from the Power (Operation) selector first."
+            )
+
+        if selected not in HOST_POWER_OPERATIONS:
+            raise HomeAssistantError(f"Unknown power operation: {selected}")
+
+        action_enum, client_action = HOST_POWER_OPERATIONS[selected]
+        if not self._resolver.is_allowed("hosts", self._moref, action_enum):
+            raise HomeAssistantError(self._resolver.explain("hosts", self._moref, action_enum))
         try:
-            await self.hass.async_add_executor_job(self._client.host_power, self._moref, "shutdown", armed)
+            await self.hass.async_add_executor_job(self._client.host_power, self._moref, client_action, False)
         except VSphereOperationError as err:
-            raise HomeAssistantError(f"Failed to shut down host {self._moref}: {err}") from err
-        if armed:
-            clear_armed(self.hass, self._entry_id, self._moref)
+            raise HomeAssistantError(f"Failed to execute {selected} on host {self._moref}: {err}") from err
 
 
-class HostRebootButton(_VSphereButton):
-    """Button to reboot a host."""
-
-    _attr_translation_key = "host_reboot"
-    _unique_id_suffix = "host_reboot"
-    _attr_device_class = ButtonDeviceClass.RESTART
-    _attr_icon = "mdi:restart"
-
-    def __init__(
-        self,
-        coordinator: VSphereData,
-        entry: ConfigEntry,
-        moref: str,
-        name: str,
-        client: VSphereClient,
-        resolver: PermissionResolver,
-    ) -> None:
-        """Initialize."""
-        super().__init__(coordinator, entry, "hosts", moref, name, client, resolver)
-
-    async def async_press(self) -> None:
-        """Reboot the host (graceful or forced depending on arm state)."""
-        from . import clear_armed, is_armed  # noqa: PLC0415
-
-        if not self._resolver.is_allowed("hosts", self._moref, HostAction.REBOOT):
-            raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.REBOOT))
-        armed = is_armed(self.hass, self._entry_id, self._moref)
-        try:
-            await self.hass.async_add_executor_job(self._client.host_power, self._moref, "reboot", armed)
-        except VSphereOperationError as err:
-            raise HomeAssistantError(f"Failed to reboot host {self._moref}: {err}") from err
-        if armed:
-            clear_armed(self.hass, self._entry_id, self._moref)
-
-
-class VmRebootButton(_VSphereButton):
-    """Button to reboot a VM."""
-
-    _attr_translation_key = "vm_reboot"
-    _unique_id_suffix = "vm_reboot"
-    _attr_device_class = ButtonDeviceClass.RESTART
-    _attr_icon = "mdi:restart"
-
-    def __init__(
-        self,
-        coordinator: VSphereData,
-        entry: ConfigEntry,
-        moref: str,
-        name: str,
-        client: VSphereClient,
-        resolver: PermissionResolver,
-    ) -> None:
-        """Initialize."""
-        super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
-
-    async def async_press(self) -> None:
-        """Reboot the VM."""
-        if not self._resolver.is_allowed("vms", self._moref, VmAction.REBOOT):
-            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.REBOOT))
-        try:
-            await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "reboot")
-        except VSphereOperationError as err:
-            raise HomeAssistantError(f"Failed to reboot VM {self._moref}: {err}") from err
-
-
-class VmResetButton(_VSphereButton):
-    """Button to hard-reset a VM."""
-
-    _attr_translation_key = "vm_reset"
-    _unique_id_suffix = "vm_reset"
-    _attr_device_class = ButtonDeviceClass.RESTART
-    _attr_icon = "mdi:power-cycle"
-
-    def __init__(
-        self,
-        coordinator: VSphereData,
-        entry: ConfigEntry,
-        moref: str,
-        name: str,
-        client: VSphereClient,
-        resolver: PermissionResolver,
-    ) -> None:
-        """Initialize."""
-        super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
-
-    async def async_press(self) -> None:
-        """Hard-reset the VM."""
-        if not self._resolver.is_allowed("vms", self._moref, VmAction.RESET):
-            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.RESET))
-        try:
-            await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "reset")
-        except VSphereOperationError as err:
-            raise HomeAssistantError(f"Failed to reset VM {self._moref}: {err}") from err
-
-
-class VmSuspendButton(_VSphereButton):
-    """Button to suspend a VM."""
-
-    _attr_translation_key = "vm_suspend"
-    _unique_id_suffix = "vm_suspend"
-    _attr_icon = "mdi:pause-circle"
-
-    def __init__(
-        self,
-        coordinator: VSphereData,
-        entry: ConfigEntry,
-        moref: str,
-        name: str,
-        client: VSphereClient,
-        resolver: PermissionResolver,
-    ) -> None:
-        """Initialize."""
-        super().__init__(coordinator, entry, "vms", moref, name, client, resolver)
-
-    async def async_press(self) -> None:
-        """Suspend the VM."""
-        if not self._resolver.is_allowed("vms", self._moref, VmAction.SUSPEND):
-            raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SUSPEND))
-        try:
-            await self.hass.async_add_executor_job(self._client.vm_power, self._moref, "suspend")
-        except VSphereOperationError as err:
-            raise HomeAssistantError(f"Failed to suspend VM {self._moref}: {err}") from err
+# ---------------------------------------------------------------------------
+# Snapshot buttons
+# ---------------------------------------------------------------------------
 
 
 class VmSnapshotCreateButton(_VSphereButton):
@@ -325,9 +276,6 @@ class VmSnapshotRemoveButton(_VSphereButton):
         if not self._resolver.is_allowed("vms", self._moref, VmAction.SNAPSHOT_REMOVE):
             raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SNAPSHOT_REMOVE))
 
-        # Find the snapshot select entity for this VM to read its current selection
-        from .select import _ALL_SNAPSHOTS  # noqa: PLC0415
-
         obj_data = self._get_data()
         snapshots: list[dict[str, str]] = obj_data.get("snapshots", []) if obj_data else []
 
@@ -347,7 +295,7 @@ class VmSnapshotRemoveButton(_VSphereButton):
             raise HomeAssistantError("No snapshot selected. Choose a snapshot from the Snapshot selector first.")
 
         try:
-            if selected == _ALL_SNAPSHOTS:
+            if selected == SNAP_SELECT_ALL:
                 await self.hass.async_add_executor_job(self._client.remove_snapshot, self._moref, SNAP_ALL)
             else:
                 # Find the moref for the selected snapshot name

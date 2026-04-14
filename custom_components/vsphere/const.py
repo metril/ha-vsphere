@@ -23,12 +23,10 @@ CONF_CATEGORIES: Final = "categories"
 CONF_ENTITY_FILTER: Final = "entity_filter"
 CONF_RESTRICTIONS: Final = "restrictions"
 CONF_PERF_INTERVAL: Final = "perf_interval"
-CONF_FORCE_ARM_TIMEOUT: Final = "force_arm_timeout"
 # Defaults
 DEFAULT_PORT: Final = 443
 DEFAULT_VERIFY_SSL: Final = False
 DEFAULT_PERF_INTERVAL: Final = 300
-DEFAULT_FORCE_ARM_TIMEOUT: Final = 30
 MIN_PERF_INTERVAL: Final = 60
 MAX_PERF_INTERVAL: Final = 3600
 
@@ -119,6 +117,9 @@ HOST_OPS_ACTIONS: Final[set[str]] = {
 SNAP_ALL: Final = "all"
 SNAP_FIRST: Final = "first"
 SNAP_LAST: Final = "last"
+
+# Snapshot select sentinel
+SNAP_SELECT_ALL: Final = "All snapshots"
 
 # Connection types
 CONN_TYPE_VCENTER: Final = "vcenter"

@@ -70,20 +70,17 @@
             "link_up": { "name": "Link Up" }
         },
         "switch": {
-            "power": { "name": "Power" },
-            "force_arm": { "name": "Power Off (Arm)" },
             "maintenance_mode": { "name": "Maintenance Mode" }
         },
         "button": {
-            "host_shutdown": { "name": "Shutdown" },
-            "host_reboot": { "name": "Reboot" },
-            "vm_reboot": { "name": "Reboot" },
-            "vm_reset": { "name": "Reset" },
-            "vm_suspend": { "name": "Suspend" },
+            "vm_power_execute": { "name": "Power (Execute)" },
+            "host_power_execute": { "name": "Power (Execute)" },
             "vm_snapshot_create": { "name": "Create Snapshot" },
             "vm_snapshot_remove": { "name": "Remove Snapshot" }
         },
         "select": {
+            "vm_power_operation": { "name": "Power (Operation)" },
+            "host_power_operation": { "name": "Power (Operation)" },
             "power_policy": { "name": "Power Policy" },
             "snapshot": { "name": "Snapshot" }
         }
@@ -204,15 +201,13 @@
                     "block_destructive": "Block destructive operations",
                     "block_snapshots": "Block all snapshot operations",
                     "block_migrate": "Block VM migration",
-                    "block_host_ops": "Block all host operations",
-                    "force_arm_timeout": "Force power arm timeout"
+                    "block_host_ops": "Block all host operations"
                 },
                 "data_description": {
                     "block_destructive": "Blocks: power off, shutdown, hard reset, and snapshot removal",
                     "block_snapshots": "Blocks: snapshot creation and removal",
                     "block_migrate": "Blocks: VM migration (vMotion) between hosts",
-                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes",
-                    "force_arm_timeout": "How long the Force Power (Arm) switch stays armed before auto-disarming (seconds)"
+                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes"
                 }
             },
             "vm_select": {
@@ -399,15 +394,13 @@
                     "block_destructive": "Block destructive operations",
                     "block_snapshots": "Block all snapshot operations",
                     "block_migrate": "Block VM migration",
-                    "block_host_ops": "Block all host operations",
-                    "force_arm_timeout": "Force power arm timeout"
+                    "block_host_ops": "Block all host operations"
                 },
                 "data_description": {
                     "block_destructive": "Blocks: power off, shutdown, hard reset, and snapshot removal",
                     "block_snapshots": "Blocks: snapshot creation and removal",
                     "block_migrate": "Blocks: VM migration (vMotion) between hosts",
-                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes",
-                    "force_arm_timeout": "How long the Force Power (Arm) switch stays armed before auto-disarming (seconds)"
+                    "block_host_ops": "Blocks: host shutdown, reboot, maintenance mode, and power policy changes"
                 }
             },
             "vm_select": {

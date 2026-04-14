@@ -120,9 +120,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await hass.async_add_executor_job(event_listener.start)
     except VSphereAuthError as err:
+        await hass.async_add_executor_job(event_listener.stop)
         await hass.async_add_executor_job(client.disconnect_poll)
         raise ConfigEntryAuthFailed(str(err)) from err
     except VSphereConnectionError as err:
+        await hass.async_add_executor_job(event_listener.stop)
         await hass.async_add_executor_job(client.disconnect_poll)
         raise ConfigEntryNotReady(str(err)) from err
 
@@ -158,7 +160,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "event_listener": event_listener,
         "perf_coordinator": perf_coordinator,
         "resolver": resolver,
-        "armed": {},
     }
 
     # ------------------------------------------------------------------
@@ -183,16 +184,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
-
-
-def is_armed(hass: HomeAssistant, entry_id: str, moref: str) -> bool:
-    """Check if a VM/host force power mode is armed."""
-    return hass.data.get(DOMAIN, {}).get(entry_id, {}).get("armed", {}).get(moref, False)
-
-
-def clear_armed(hass: HomeAssistant, entry_id: str, moref: str) -> None:
-    """Clear the armed state for a VM/host."""
-    hass.data.get(DOMAIN, {}).get(entry_id, {}).get("armed", {}).pop(moref, None)
 
 
 def _async_cleanup_stale_entities(
@@ -249,7 +240,7 @@ def _async_cleanup_stale_entities(
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a vSphere config entry."""
-    entry_data: dict[str, Any] = hass.data[DOMAIN].get(entry.entry_id, {})
+    entry_data: dict[str, Any] = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
 
     event_listener: VSphereEventListener | None = entry_data.get("event_listener")
     perf_coordinator: VSpherePerfCoordinator | None = entry_data.get("perf_coordinator")
@@ -271,12 +262,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.async_add_executor_job(client.disconnect_poll)
 
     # Remove from hass.data
-    hass.data[DOMAIN].pop(entry.entry_id, None)
-
-    # Unregister services when the last entry is removed
-    if not hass.data[DOMAIN]:
-        async_unregister_services(hass)
-        hass.data.pop(DOMAIN, None)
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is not None:
+        domain_data.pop(entry.entry_id, None)
+        if not domain_data:
+            async_unregister_services(hass)
+            hass.data.pop(DOMAIN, None)
 
     return unload_ok
 

@@ -9,7 +9,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, HostAction
+from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, SNAP_SELECT_ALL, HostAction, VmAction
 from .entity import VSphereEntity
 from .exceptions import VSphereOperationError
 
@@ -24,7 +24,23 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-_ALL_SNAPSHOTS = "All snapshots"
+_ALL_SNAPSHOTS = SNAP_SELECT_ALL
+
+# VM power operation display names → (VmAction, client action string)
+VM_POWER_OPERATIONS: dict[str, tuple[VmAction, str]] = {
+    "Power On": (VmAction.POWER_ON, "power_on"),
+    "Shutdown Guest OS": (VmAction.SHUTDOWN, "shutdown"),
+    "Restart Guest OS": (VmAction.REBOOT, "reboot"),
+    "Suspend": (VmAction.SUSPEND, "suspend"),
+    "Power Off": (VmAction.POWER_OFF, "power_off"),
+    "Reset": (VmAction.RESET, "reset"),
+}
+
+# Host power operation display names → (HostAction, client action string)
+HOST_POWER_OPERATIONS: dict[str, tuple[HostAction, str]] = {
+    "Shutdown": (HostAction.SHUTDOWN, "shutdown"),
+    "Reboot": (HostAction.REBOOT, "reboot"),
+}
 
 
 async def async_setup_entry(
@@ -44,6 +60,14 @@ async def async_setup_entry(
     if categories.get("hosts"):
         for moref, host_data in coordinator.data.get("hosts", {}).items():
             name: str = host_data.get("name", moref)
+            entities.append(
+                HostPowerOperationSelect(
+                    coordinator=coordinator,
+                    entry=entry,
+                    moref=moref,
+                    name=name,
+                )
+            )
             policies: list[dict[str, Any]] = host_data.get("available_power_policies", [])
             if policies:
                 entities.append(
@@ -61,6 +85,14 @@ async def async_setup_entry(
     if categories.get("vms"):
         for moref, vm_data in coordinator.data.get("vms", {}).items():
             name = vm_data.get("name", moref)
+            entities.append(
+                VmPowerOperationSelect(
+                    coordinator=coordinator,
+                    entry=entry,
+                    moref=moref,
+                    name=name,
+                )
+            )
             entities.append(
                 VmSnapshotSelect(
                     coordinator=coordinator,
@@ -127,6 +159,70 @@ class HostPowerPolicySelect(VSphereEntity, SelectEntity):
             raise HomeAssistantError(f"Failed to set power policy on host {self._moref}: {err}") from err
 
 
+class VmPowerOperationSelect(VSphereEntity, SelectEntity):
+    """Select entity for choosing a VM power operation."""
+
+    _attr_icon = "mdi:power"
+    _attr_translation_key = "vm_power_operation"
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        moref: str,
+        name: str,
+    ) -> None:
+        """Initialize the VM power operation select."""
+        super().__init__(coordinator, entry, "vms", moref, name)
+        self._attr_unique_id = f"{entry.entry_id}_{moref}_vm_power_operation"
+        self._attr_options = list(VM_POWER_OPERATIONS)
+        self._selected: str | None = None
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected power operation."""
+        if self._selected and self._selected in self._attr_options:
+            return self._selected
+        return None
+
+    async def async_select_option(self, option: str) -> None:
+        """Update the selected power operation."""
+        self._selected = option
+        self.async_write_ha_state()
+
+
+class HostPowerOperationSelect(VSphereEntity, SelectEntity):
+    """Select entity for choosing a host power operation."""
+
+    _attr_icon = "mdi:power"
+    _attr_translation_key = "host_power_operation"
+
+    def __init__(
+        self,
+        coordinator: VSphereData,
+        entry: ConfigEntry,
+        moref: str,
+        name: str,
+    ) -> None:
+        """Initialize the host power operation select."""
+        super().__init__(coordinator, entry, "hosts", moref, name)
+        self._attr_unique_id = f"{entry.entry_id}_{moref}_host_power_operation"
+        self._attr_options = list(HOST_POWER_OPERATIONS)
+        self._selected: str | None = None
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected power operation."""
+        if self._selected and self._selected in self._attr_options:
+            return self._selected
+        return None
+
+    async def async_select_option(self, option: str) -> None:
+        """Update the selected power operation."""
+        self._selected = option
+        self.async_write_ha_state()
+
+
 class VmSnapshotSelect(VSphereEntity, SelectEntity):
     """Select entity listing VM snapshots for targeted removal."""
 
@@ -144,6 +240,14 @@ class VmSnapshotSelect(VSphereEntity, SelectEntity):
         self._attr_unique_id = f"{entry.entry_id}_{moref}_snapshot_select"
         self._attr_translation_key = "snapshot"
         self._selected: str | None = None
+
+    @property
+    def available(self) -> bool:
+        """Unavailable when the VM has no snapshots."""
+        obj_data = self._get_data()
+        if obj_data is None:
+            return False
+        return bool(obj_data.get("snapshots")) and super().available
 
     @property
     def options(self) -> list[str]:

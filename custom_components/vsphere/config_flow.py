@@ -17,9 +17,6 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
     BooleanSelector,
     DurationSelector,
-    NumberSelector,
-    NumberSelectorConfig,
-    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -32,7 +29,6 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_CATEGORIES,
     CONF_ENTITY_FILTER,
-    CONF_FORCE_ARM_TIMEOUT,
     CONF_HOST,
     CONF_PASSWORD,
     CONF_PERF_INTERVAL,
@@ -42,7 +38,6 @@ from .const import (
     CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_CATEGORIES,
-    DEFAULT_FORCE_ARM_TIMEOUT,
     DEFAULT_PERF_INTERVAL,
     DEFAULT_PORT,
     DEFAULT_VERIFY_SSL,
@@ -168,7 +163,6 @@ def _restrictions_schema(
 ) -> vol.Schema:
     """Return the global restrictions step schema."""
     global_restrictions: dict[str, Any] = (current_restrictions or {}).get("global", {})
-    force_arm_timeout = (current_restrictions or {}).get(CONF_FORCE_ARM_TIMEOUT, DEFAULT_FORCE_ARM_TIMEOUT)
     return vol.Schema(
         {
             vol.Required(
@@ -187,14 +181,6 @@ def _restrictions_schema(
                 "block_host_ops",
                 default=global_restrictions.get("host_ops", False),
             ): BooleanSelector(),
-            vol.Required(
-                CONF_FORCE_ARM_TIMEOUT,
-                default=force_arm_timeout,
-            ): NumberSelector(
-                NumberSelectorConfig(
-                    min=10, max=300, step=5, mode=NumberSelectorMode.BOX, unit_of_measurement="seconds"
-                )
-            ),
         }
     )
 
@@ -289,9 +275,6 @@ class _RestrictionFlowMixin:
                 "migrate": user_input.get("block_migrate", False),
                 "host_ops": user_input.get("block_host_ops", False),
             }
-            self._restrictions[CONF_FORCE_ARM_TIMEOUT] = int(
-                user_input.get(CONF_FORCE_ARM_TIMEOUT, DEFAULT_FORCE_ARM_TIMEOUT)
-            )
             return await self.async_step_restrictions_menu()
 
         return self.async_show_form(
@@ -668,10 +651,14 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
             if not errors:
                 new_unique_id = f"{flat_input[CONF_HOST]}:{flat_input[CONF_PORT]}"
                 await self.async_set_unique_id(new_unique_id)
-                self._abort_if_unique_id_configured()
+                # Check for collision with other entries (not the one being reconfigured)
+                for existing in self._async_current_entries(include_ignore=True):
+                    if existing.unique_id == new_unique_id and existing.entry_id != reconfigure_entry.entry_id:
+                        return self.async_abort(reason="already_configured")
 
                 return self.async_update_reload_and_abort(
                     reconfigure_entry,
+                    unique_id=new_unique_id,
                     data={**existing_data, **flat_input},
                 )
 
