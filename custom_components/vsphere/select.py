@@ -176,18 +176,11 @@ class VmPowerOperationSelect(VSphereEntity, SelectEntity):
         super().__init__(coordinator, entry, "vms", moref, name)
         self._attr_unique_id = f"{entry.entry_id}_{moref}_vm_power_operation"
         self._attr_options = list(VM_POWER_OPERATIONS)
-        self._selected: str | None = None
-
-    @property
-    def current_option(self) -> str | None:
-        """Return the currently selected power operation."""
-        if self._selected and self._selected in self._attr_options:
-            return self._selected
-        return None
+        self._attr_current_option = self._attr_options[0]
 
     async def async_select_option(self, option: str) -> None:
         """Update the selected power operation."""
-        self._selected = option
+        self._attr_current_option = option
         self.async_write_ha_state()
 
 
@@ -208,18 +201,11 @@ class HostPowerOperationSelect(VSphereEntity, SelectEntity):
         super().__init__(coordinator, entry, "hosts", moref, name)
         self._attr_unique_id = f"{entry.entry_id}_{moref}_host_power_operation"
         self._attr_options = list(HOST_POWER_OPERATIONS)
-        self._selected: str | None = None
-
-    @property
-    def current_option(self) -> str | None:
-        """Return the currently selected power operation."""
-        if self._selected and self._selected in self._attr_options:
-            return self._selected
-        return None
+        self._attr_current_option = self._attr_options[0]
 
     async def async_select_option(self, option: str) -> None:
         """Update the selected power operation."""
-        self._selected = option
+        self._attr_current_option = option
         self.async_write_ha_state()
 
 
