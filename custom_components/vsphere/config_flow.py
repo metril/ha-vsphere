@@ -241,23 +241,27 @@ class _RestrictionFlowMixin:
         """Ensure inventory is loaded. No-op by default; overridden in options flow."""
 
     def _vm_options(self) -> list[SelectOptionDict]:
-        """Return sorted VM options from inventory."""
+        """Return sorted VM options from inventory, filtered to monitored VMs."""
+        vm_filter = self._entity_filter.get("vms", {})
+        allowed = set(vm_filter.get("morefs", [])) if vm_filter.get("mode") == FILTER_MODE_SELECT else None
         return sorted(
             [
                 SelectOptionDict(value=moref, label=info.get("name", moref))
                 for moref, info in self._inventory.items()
-                if info.get("type") == "vm"
+                if info.get("type") == "vm" and (allowed is None or moref in allowed)
             ],
             key=lambda x: x["label"],
         )
 
     def _host_options(self) -> list[SelectOptionDict]:
-        """Return sorted host options from inventory."""
+        """Return sorted host options from inventory, filtered to monitored hosts."""
+        host_filter = self._entity_filter.get("hosts", {})
+        allowed = set(host_filter.get("morefs", [])) if host_filter.get("mode") == FILTER_MODE_SELECT else None
         return sorted(
             [
                 SelectOptionDict(value=moref, label=info.get("name", moref))
                 for moref, info in self._inventory.items()
-                if info.get("type") == "host"
+                if info.get("type") == "host" and (allowed is None or moref in allowed)
             ],
             key=lambda x: x["label"],
         )
