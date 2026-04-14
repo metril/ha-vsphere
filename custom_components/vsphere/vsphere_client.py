@@ -819,47 +819,47 @@ class VSphereClient:
         try:
             for vm_obj in container.view:
                 vm_moref = str(vm_obj._moId)  # noqa: SLF001
-                vm_name = vm_obj.summary.config.name
+                try:
+                    vm_name = vm_obj.summary.config.name
 
-                # Per-disk storage from vm.layoutEx
-                layout = getattr(vm_obj, "layoutEx", None)
-                if not layout:
-                    continue
-
-                # Get virtual disks from config
-                for device in vm_obj.config.hardware.device or []:
-                    if not isinstance(device, vim.vm.device.VirtualDisk):
+                    # Per-disk storage from vm.layoutEx
+                    layout = getattr(vm_obj, "layoutEx", None)
+                    if not layout:
                         continue
 
-                    label = device.deviceInfo.label  # e.g., "Hard disk 1"
-                    if hasattr(device, "capacityInBytes") and device.capacityInBytes:
-                        capacity_gb = round(device.capacityInBytes / (1024**3), 2)
-                    elif hasattr(device, "capacityInKB") and device.capacityInKB:
-                        capacity_gb = round(device.capacityInKB / (1024**2), 2)
-                    else:
-                        capacity_gb = 0.0
+                    # Get virtual disks from config
+                    for device in vm_obj.config.hardware.device or []:
+                        if not isinstance(device, vim.vm.device.VirtualDisk):
+                            continue
 
-                    # Get backing file info
-                    backing = device.backing
-                    thin_provisioned = getattr(backing, "thinProvisioned", None)
-                    datastore_name = None
-                    if hasattr(backing, "datastore") and backing.datastore:
-                        datastore_name = backing.datastore.name
+                        label = device.deviceInfo.label  # e.g., "Hard disk 1"
+                        if hasattr(device, "capacityInBytes") and device.capacityInBytes:
+                            capacity_gb = round(device.capacityInBytes / (1024**3), 2)
+                        elif hasattr(device, "capacityInKB") and device.capacityInKB:
+                            capacity_gb = round(device.capacityInKB / (1024**2), 2)
+                        else:
+                            capacity_gb = 0.0
 
-                    disk_key = f"{vm_moref}_disk_{device.key}"
-                    storage[disk_key] = {
-                        "moref": disk_key,
-                        "name": f"{vm_name} - {label}",
-                        "vm_moref": vm_moref,
-                        "vm_name": vm_name,
-                        "label": label,
-                        "capacity_gb": capacity_gb,
-                        "thin_provisioned": thin_provisioned,
-                        "datastore": datastore_name,
-                    }
+                        # Get backing file info
+                        backing = device.backing
+                        thin_provisioned = getattr(backing, "thinProvisioned", None)
+                        datastore_name = None
+                        if hasattr(backing, "datastore") and backing.datastore:
+                            datastore_name = backing.datastore.name
 
-                # Storage summary per VM
-                try:
+                        disk_key = f"{vm_moref}_disk_{device.key}"
+                        storage[disk_key] = {
+                            "moref": disk_key,
+                            "name": f"{vm_name} - {label}",
+                            "vm_moref": vm_moref,
+                            "vm_name": vm_name,
+                            "label": label,
+                            "capacity_gb": capacity_gb,
+                            "thin_provisioned": thin_provisioned,
+                            "datastore": datastore_name,
+                        }
+
+                    # Storage summary per VM
                     if vm_obj.summary.storage:
                         committed = vm_obj.summary.storage.committed
                         uncommitted = vm_obj.summary.storage.uncommitted
@@ -875,7 +875,7 @@ class VSphereClient:
                             "unshared_gb": round(unshared / (1024**3), 2) if unshared else 0.0,
                         }
                 except Exception:  # noqa: BLE001
-                    _LOGGER.debug("Failed to get storage details for %s", vm_name, exc_info=True)
+                    _LOGGER.debug("Failed to get storage details for VM %s", vm_moref, exc_info=True)
         finally:
             container.Destroy()
         return storage

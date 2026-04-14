@@ -332,7 +332,7 @@ async def _handle_vm_migrate(call: ServiceCall) -> None:
         call.hass,
         call.data[ATTR_DEVICE_ID],
         "vms",
-        "migrate",
+        VmAction.MIGRATE,
         lambda c, m: call.hass.async_add_executor_job(c.vm_migrate, m, host_moref),
     )
 

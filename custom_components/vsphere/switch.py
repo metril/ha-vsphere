@@ -145,9 +145,10 @@ class VmPowerSwitch(VSphereEntity, SwitchEntity):
         """Shut down the VM (graceful or hard depending on arm state)."""
         from . import clear_armed, is_armed  # noqa: PLC0415
 
-        if not self._resolver.is_allowed("vms", self._moref, VmAction.POWER_OFF):
-            raise HomeAssistantError(f"Power off is not allowed for VM {self._moref}")
         armed = is_armed(self.hass, self._entry_id, self._moref)
+        check_action = VmAction.POWER_OFF if armed else VmAction.SHUTDOWN
+        if not self._resolver.is_allowed("vms", self._moref, check_action):
+            raise HomeAssistantError(self._resolver.explain("vms", self._moref, check_action))
         action = "power_off" if armed else "shutdown"
         try:
             await self.hass.async_add_executor_job(self._client.vm_power, self._moref, action)
@@ -173,6 +174,7 @@ class _ForceArmSwitch(VSphereEntity, SwitchEntity):
     """
 
     _attr_icon = "mdi:shield-alert"
+    _attr_translation_key = "force_arm"
 
     def __init__(
         self,
@@ -185,9 +187,7 @@ class _ForceArmSwitch(VSphereEntity, SwitchEntity):
         """Initialize the force arm switch."""
         super().__init__(coordinator, entry, object_type, moref, name)
         self._entry_id = entry.entry_id
-        self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{moref}_force_arm"
-        self._attr_translation_key = "force_arm"
         self._disarm_cancel: CALLBACK_TYPE | None = None
 
     @property
