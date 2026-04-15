@@ -298,8 +298,16 @@ class VmSnapshotRemoveButton(_VSphereButton):
             if selected == SNAP_SELECT_ALL:
                 await self.hass.async_add_executor_job(self._client.remove_snapshot, self._moref, SNAP_ALL)
             else:
-                # Find the moref for the selected snapshot name
-                snap_moref = next((s["moref"] for s in snapshots if s["name"] == selected), None)
+                # Build the same disambiguated name→moref mapping as VmSnapshotSelect
+                raw_names = [s["name"] for s in snapshots]
+                seen: dict[str, int] = {}
+                name_to_moref: dict[str, str] = {}
+                for s in snapshots:
+                    n = s["name"]
+                    seen[n] = seen.get(n, 0) + 1
+                    display = f"{n} ({seen[n]})" if raw_names.count(n) > 1 else n
+                    name_to_moref[display] = s["moref"]
+                snap_moref = name_to_moref.get(selected)
                 if snap_moref is None:
                     raise HomeAssistantError(f"Snapshot '{selected}' not found on VM {self._moref}")
                 await self.hass.async_add_executor_job(self._client.remove_snapshot_by_moref, self._moref, snap_moref)

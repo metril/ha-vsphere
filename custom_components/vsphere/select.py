@@ -248,7 +248,16 @@ class VmSnapshotSelect(VSphereEntity, SelectEntity):
         snapshots: list[dict[str, str]] = obj_data.get("snapshots", []) if obj_data else []
         if not snapshots:
             return []
-        names = [s["name"] for s in snapshots]
+        # Disambiguate duplicate snapshot names with a suffix
+        raw_names = [s["name"] for s in snapshots]
+        seen: dict[str, int] = {}
+        names: list[str] = []
+        for n in raw_names:
+            seen[n] = seen.get(n, 0) + 1
+            if raw_names.count(n) > 1:
+                names.append(f"{n} ({seen[n]})")
+            else:
+                names.append(n)
         names.append(_ALL_SNAPSHOTS)
         return names
 

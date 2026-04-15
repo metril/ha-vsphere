@@ -20,7 +20,7 @@ from .const import (
     HostAction,
     VmAction,
 )
-from .exceptions import VSphereOperationError
+from .exceptions import VSphereConnectionError, VSphereOperationError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -204,7 +204,7 @@ async def _resolve_and_call(
         raise HomeAssistantError(resolver.explain(category, moref, action))
     try:
         await call_fn(client, moref)
-    except VSphereOperationError as err:
+    except (VSphereOperationError, VSphereConnectionError) as err:
         raise HomeAssistantError(str(err)) from err
     return client, resolver, entry_id, moref
 
@@ -316,7 +316,10 @@ async def _handle_list_power_policies(call: ServiceCall) -> dict[str, Any]:
 
 async def _handle_vm_migrate(call: ServiceCall) -> None:
     """Handle the vm_migrate service call."""
-    _, _, _, host_moref = _resolve_device(call.hass, call.data["target_host"])
+    _, _, target_entry_id, host_moref = _resolve_device(call.hass, call.data["target_host"])
+    _, _, vm_entry_id, _ = _resolve_device(call.hass, call.data[ATTR_DEVICE_ID])
+    if target_entry_id != vm_entry_id:
+        raise HomeAssistantError("VM and target host must belong to the same vSphere connection")
     await _resolve_and_call(
         call.hass,
         call.data[ATTR_DEVICE_ID],
