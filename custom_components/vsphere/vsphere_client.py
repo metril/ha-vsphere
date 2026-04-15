@@ -1476,6 +1476,8 @@ class VSphereClient:
 
             # CPU
             if hardware and hardware.cpuMhz and hardware.numCpuCores:
+                data["cpu_mhz"] = hardware.cpuMhz
+                data["cpu_cores"] = hardware.numCpuCores
                 data["cpu_total_ghz"] = round(hardware.cpuMhz * hardware.numCpuCores / 1000, 2)
             else:
                 data["cpu_total_ghz"] = 0.0

@@ -319,15 +319,15 @@ class VSphereEventListener:
         # Pass existing stored data for lookups (e.g., max_cpu_mhz for CPU % derivation)
         stored = self._vsphere_data._data.get(category, {}).get(moref, {}) if moref else {}  # noqa: SLF001
         if category == "hosts":
-            self._derive_host_values(translated)
+            self._derive_host_values(translated, stored)
         elif category == "vms":
             self._derive_vm_values(translated, stored)
         elif category == "datastores":
-            self._derive_datastore_values(translated)
+            self._derive_datastore_values(translated, stored)
 
         return {k: v for k, v in translated.items() if not k.startswith("_")}
 
-    def _derive_host_values(self, d: dict[str, Any]) -> None:
+    def _derive_host_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived host values from raw inputs."""
         if "_uptime_raw" in d:
             val = d.pop("_uptime_raw")
@@ -341,22 +341,23 @@ class VSphereEventListener:
             val = d.pop("_mem_usage_raw")
             if val is not None:
                 d["mem_usage_gb"] = round(val / 1024, 2)
-        if "_cpu_mhz" in d and "_cpu_cores" in d:
-            mhz, cores = d.pop("_cpu_mhz"), d.pop("_cpu_cores")
+        if "_cpu_mhz" in d or "_cpu_cores" in d:
+            mhz = d.pop("_cpu_mhz", None) or (stored or {}).get("cpu_mhz")
+            cores = d.pop("_cpu_cores", None) or (stored or {}).get("cpu_cores")
             if mhz and cores:
                 d["cpu_total_ghz"] = round(mhz * cores / 1000, 2)
-        else:
-            d.pop("_cpu_mhz", None)
-            d.pop("_cpu_cores", None)
+                d["cpu_mhz"] = mhz
+                d["cpu_cores"] = cores
         if "_mem_bytes" in d:
             val = d.pop("_mem_bytes")
             if val:
                 d["mem_total_gb"] = round(val / (1024**3), 2)
         if "_vm_list" in d:
             val = d.pop("_vm_list")
-            d["vm_count"] = (
-                sum(1 for vm in val if not getattr(getattr(vm, "config", None), "template", False)) if val else 0
-            )
+            # Count all VMs without accessing vm.config (would trigger live RPC on push thread).
+            # Templates are excluded in the initial fetch; push count may include them but the
+            # next full fetch (reconnect) corrects it.
+            d["vm_count"] = len(val) if val else 0
 
     def _derive_vm_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived VM values from raw inputs."""
@@ -402,7 +403,7 @@ class VSphereEventListener:
         d.pop("_configured_guest_os", None)
         d.pop("_config_status", None)
 
-    def _derive_datastore_values(self, d: dict[str, Any]) -> None:
+    def _derive_datastore_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived datastore values from raw inputs."""
         if "_capacity_raw" in d:
             val = d.pop("_capacity_raw")
@@ -412,8 +413,11 @@ class VSphereEventListener:
             val = d.pop("_free_raw")
             if val:
                 d["free_gb"] = round(val / (1024**3), 2)
-        if "capacity_gb" in d and "free_gb" in d:
-            d["used_gb"] = round(max(d["capacity_gb"] - d["free_gb"], 0.0), 2)
+        # Recompute used_gb from whichever values are available (delta or stored)
+        cap = d.get("capacity_gb") or (stored or {}).get("capacity_gb")
+        free = d.get("free_gb") or (stored or {}).get("free_gb")
+        if cap is not None and free is not None:
+            d["used_gb"] = round(max(cap - free, 0.0), 2)
         if "_host_list" in d:
             val = d.pop("_host_list")
             d["connected_hosts"] = len(val) if val else 0

@@ -236,7 +236,10 @@ class VmSnapshotSelect(VSphereEntity, SelectEntity):
         obj_data = self._get_data()
         if obj_data is None:
             return False
-        return bool(obj_data.get("snapshots")) and super().available
+        has_snapshots = bool(obj_data.get("snapshots"))
+        if not has_snapshots:
+            self._selected = None
+        return has_snapshots and super().available
 
     @property
     def options(self) -> list[str]:

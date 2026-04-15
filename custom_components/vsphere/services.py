@@ -339,7 +339,10 @@ async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> No
     snapshot_names: list[str] = call.data[ATTR_SNAPSHOTS]
 
     # Get snapshot data from coordinator
-    coordinator = hass.data[DOMAIN][entry_id]["coordinator"]
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id, {})
+    coordinator = entry_data.get("coordinator")
+    if coordinator is None:
+        raise HomeAssistantError(f"vSphere config entry '{entry_id}' is not loaded")
     vm_data = (coordinator.data or {}).get("vms", {}).get(vm_moref, {})
     snapshots: list[dict[str, str]] = vm_data.get("snapshots", [])
 

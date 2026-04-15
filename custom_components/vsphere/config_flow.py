@@ -233,6 +233,7 @@ class _RestrictionFlowMixin:
 
     # Declared for type checkers — initialized in each concrete __init__
     _inventory: dict[str, dict[str, Any]]
+    _entity_filter: dict[str, Any]
     _restrictions: dict[str, Any]
     _current_vm_moref: str | None
     _current_host_moref: str | None

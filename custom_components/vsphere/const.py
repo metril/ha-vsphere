@@ -7,9 +7,6 @@ from typing import Final
 
 DOMAIN: Final = "vsphere"
 
-# Platforms
-PLATFORMS: Final = ["sensor", "binary_sensor", "switch", "button", "select"]
-
 # Config entry data keys
 CONF_HOST: Final = "host"
 CONF_PORT: Final = "port"
