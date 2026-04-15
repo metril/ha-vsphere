@@ -127,6 +127,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.async_add_executor_job(event_listener.stop)
         await hass.async_add_executor_job(client.disconnect_poll)
         raise ConfigEntryNotReady(str(err)) from err
+    except Exception as err:
+        await hass.async_add_executor_job(event_listener.stop)
+        await hass.async_add_executor_job(client.disconnect_poll)
+        raise ConfigEntryNotReady(f"Unexpected error starting vSphere listener: {err}") from err
 
     # Wait for initial data before setting up platforms (event listener
     # pushes data from a background thread via call_soon_threadsafe)

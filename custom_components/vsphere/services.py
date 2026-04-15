@@ -353,7 +353,7 @@ async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> No
         if snap_name.lower() == "all":
             try:
                 await hass.async_add_executor_job(client.remove_snapshot, vm_moref, SNAP_ALL)
-            except VSphereOperationError as err:
+            except (VSphereOperationError, VSphereConnectionError) as err:
                 raise HomeAssistantError(str(err)) from err
             return  # "all" removes everything, no need to continue
 
@@ -362,7 +362,7 @@ async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> No
             raise HomeAssistantError(f"Snapshot '{snap_name}' not found on VM {vm_moref}")
         try:
             await hass.async_add_executor_job(client.remove_snapshot_by_moref, vm_moref, snap_moref)
-        except VSphereOperationError as err:
+        except (VSphereOperationError, VSphereConnectionError) as err:
             raise HomeAssistantError(str(err)) from err
 
 

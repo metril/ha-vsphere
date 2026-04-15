@@ -375,6 +375,8 @@ class VSphereEventListener:
             max_cpu = d.get("max_cpu_mhz") or (stored or {}).get("max_cpu_mhz")
             if usage is not None and max_cpu:
                 d["cpu_use_pct"] = round((usage / max_cpu) * 100, 2)
+            else:
+                d["cpu_use_pct"] = 0.0
         if "_storage_raw" in d:
             val = d.pop("_storage_raw")
             if val:
@@ -407,11 +409,11 @@ class VSphereEventListener:
         """Compute derived datastore values from raw inputs."""
         if "_capacity_raw" in d:
             val = d.pop("_capacity_raw")
-            if val:
+            if val is not None:
                 d["capacity_gb"] = round(val / (1024**3), 2)
         if "_free_raw" in d:
             val = d.pop("_free_raw")
-            if val:
+            if val is not None:
                 d["free_gb"] = round(val / (1024**3), 2)
         # Recompute used_gb from whichever values are available (delta or stored)
         cap = d.get("capacity_gb") or (stored or {}).get("capacity_gb")
@@ -508,11 +510,11 @@ class VSphereEventListener:
         if alarm_states:
             for alarm_state in alarm_states:
                 try:
+                    # Use alarm_state.key as the name — accessing alarm_state.alarm.info.name
+                    # would trigger a live RPC on the push thread (forbidden by architecture)
                     alarm_info = {
                         "alarm_key": str(alarm_state.key),
-                        "alarm_name": str(alarm_state.alarm.info.name)
-                        if hasattr(alarm_state.alarm, "info")
-                        else str(alarm_state.alarm),
+                        "alarm_name": str(alarm_state.key),
                         "status": str(alarm_state.overallStatus),
                         "time": str(alarm_state.time) if alarm_state.time else None,
                         "acknowledged": getattr(alarm_state, "acknowledged", False),

@@ -122,19 +122,5 @@ SNAP_SELECT_ALL: Final = "\u2014 All snapshots \u2014"
 CONN_TYPE_VCENTER: Final = "vcenter"
 CONN_TYPE_ESXI: Final = "esxi"
 
-# VM power states (from vSphere)
-VM_POWER_ON: Final = "poweredOn"
-VM_POWER_OFF: Final = "poweredOff"
-VM_SUSPENDED: Final = "suspended"
-
-# Host power states
-HOST_POWER_ON: Final = "poweredOn"
-HOST_POWER_OFF: Final = "poweredOff"
-
-# VM state display names
-VM_STATE_RUNNING: Final = "running"
-VM_STATE_OFF: Final = "off"
-VM_STATE_SUSPENDED: Final = "suspended"
-
 # License filtering
 INVALID_LICENSE_KEY: Final = "00000-00000-00000-00000-00000"
