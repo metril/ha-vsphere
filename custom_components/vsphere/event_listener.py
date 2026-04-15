@@ -328,11 +328,11 @@ class VSphereEventListener:
         if "_uptime_raw" in d:
             val = d.pop("_uptime_raw")
             if val is not None:
-                d["uptime_hours"] = round(val / 3600, 1)
+                d["uptime_hours"] = round(val / 3600, 2)
         if "_cpu_usage_raw" in d:
             val = d.pop("_cpu_usage_raw")
             if val is not None:
-                d["cpu_usage_ghz"] = round(val / 1000, 1)
+                d["cpu_usage_ghz"] = round(val / 1000, 2)
         if "_mem_usage_raw" in d:
             val = d.pop("_mem_usage_raw")
             if val is not None:
@@ -340,7 +340,7 @@ class VSphereEventListener:
         if "_cpu_mhz" in d and "_cpu_cores" in d:
             mhz, cores = d.pop("_cpu_mhz"), d.pop("_cpu_cores")
             if mhz and cores:
-                d["cpu_total_ghz"] = round(mhz * cores / 1000, 1)
+                d["cpu_total_ghz"] = round(mhz * cores / 1000, 2)
         else:
             d.pop("_cpu_mhz", None)
             d.pop("_cpu_cores", None)
@@ -362,7 +362,7 @@ class VSphereEventListener:
         if "_uptime_raw" in d:
             val = d.pop("_uptime_raw")
             if val is not None:
-                d["uptime_hours"] = round(val / 3600, 1)
+                d["uptime_hours"] = round(val / 3600, 2)
         if "_cpu_usage_raw" in d and "_max_cpu" in d:
             usage, max_cpu = d.pop("_cpu_usage_raw"), d.pop("_max_cpu")
             if usage and max_cpu:
