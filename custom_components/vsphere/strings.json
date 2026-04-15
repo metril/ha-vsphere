@@ -58,7 +58,8 @@
             "datastore": { "name": "Datastore" },
             "committed_gb": { "name": "Committed" },
             "uncommitted_gb": { "name": "Uncommitted" },
-            "unshared_gb": { "name": "Unshared" }
+            "unshared_gb": { "name": "Unshared" },
+            "active_alarm_count": { "name": "Active Alarms" }
         },
         "binary_sensor": {
             "powered_on": { "name": "Powered On" },
@@ -67,7 +68,8 @@
             "drs_enabled": { "name": "DRS Enabled" },
             "ha_enabled": { "name": "HA Enabled" },
             "ha_admission_control": { "name": "HA Admission Control" },
-            "link_up": { "name": "Link Up" }
+            "link_up": { "name": "Link Up" },
+            "alarm_active": { "name": "Alarm" }
         },
         "switch": {
             "maintenance_mode": { "name": "Maintenance Mode" }

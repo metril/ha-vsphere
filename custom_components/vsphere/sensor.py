@@ -601,6 +601,7 @@ VM_STORAGE_SUMMARY_SENSORS: tuple[VSphereSensorDescription, ...] = (
 ALARM_SENSORS: tuple[VSphereSensorDescription, ...] = (
     VSphereSensorDescription(
         key="active_alarm_count",
+        translation_key="active_alarm_count",
         name="Active Alarms",
         icon="mdi:alarm-light",
         state_class=SensorStateClass.MEASUREMENT,

@@ -155,7 +155,7 @@ class HostPowerPolicySelect(VSphereEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Change the host power policy."""
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.POWER_POLICY):
-            raise HomeAssistantError(f"Power policy change is not allowed for host {self._moref}")
+            raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.POWER_POLICY))
         try:
             await self.hass.async_add_executor_job(self._client.host_set_power_policy, self._moref, option)
         except VSphereOperationError as err:

@@ -121,6 +121,7 @@ PNIC_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
 ALARM_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
     VSphereBinarySensorDescription(
         key="alarm_active",
+        translation_key="alarm_active",
         name="Alarm",
         device_class=BinarySensorDeviceClass.PROBLEM,
         value_fn=lambda data: any(a.get("status") == "red" for a in data) if isinstance(data, list) else False,

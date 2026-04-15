@@ -89,7 +89,7 @@ class HostMaintenanceSwitch(VSphereEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enter maintenance mode."""
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.MAINTENANCE):
-            raise HomeAssistantError(f"Maintenance mode change is not allowed for host {self._moref}")
+            raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.MAINTENANCE))
         try:
             await self.hass.async_add_executor_job(self._client.host_set_maintenance_mode, self._moref, True)
         except VSphereOperationError as err:
@@ -98,7 +98,7 @@ class HostMaintenanceSwitch(VSphereEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Exit maintenance mode."""
         if not self._resolver.is_allowed("hosts", self._moref, HostAction.MAINTENANCE):
-            raise HomeAssistantError(f"Maintenance mode change is not allowed for host {self._moref}")
+            raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.MAINTENANCE))
         try:
             await self.hass.async_add_executor_job(self._client.host_set_maintenance_mode, self._moref, False)
         except VSphereOperationError as err:
