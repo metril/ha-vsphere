@@ -579,4 +579,5 @@ class VSphereEventListener:
         self._pc, self._pc_filter, self._containers = self._client.create_property_filter(
             self._categories, self._entity_filter
         )
+        self._alarm_cache.clear()
         self._do_initial_fetch()

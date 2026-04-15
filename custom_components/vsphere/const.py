@@ -118,8 +118,8 @@ SNAP_ALL: Final = "all"
 SNAP_FIRST: Final = "first"
 SNAP_LAST: Final = "last"
 
-# Snapshot select sentinel
-SNAP_SELECT_ALL: Final = "All snapshots"
+# Snapshot select sentinel (prefixed with \u2014 to avoid collision with real snapshot names)
+SNAP_SELECT_ALL: Final = "\u2014 All snapshots \u2014"
 
 # Connection types
 CONN_TYPE_VCENTER: Final = "vcenter"

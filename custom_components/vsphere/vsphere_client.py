@@ -329,7 +329,7 @@ class VSphereClient:
                                 "name": f"{host_name} - {vswitch.name}",
                                 "type": "vswitch",
                                 "num_ports": vswitch.numPorts,
-                                "num_ports_available": vswitch.numPorts
+                                "num_ports_used": vswitch.numPorts
                                 - (vswitch.numPortsAvailable if hasattr(vswitch, "numPortsAvailable") else 0)
                                 if vswitch.numPorts
                                 else 0,
