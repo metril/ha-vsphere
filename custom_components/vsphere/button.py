@@ -210,7 +210,7 @@ class HostPowerExecuteButton(_PowerExecuteButton):
         if not self._resolver.is_allowed("hosts", self._moref, action_enum):
             raise HomeAssistantError(self._resolver.explain("hosts", self._moref, action_enum))
         try:
-            await self.hass.async_add_executor_job(self._client.host_power, self._moref, client_action, False)
+            await self.hass.async_add_executor_job(self._client.host_power, self._moref, client_action, True)
         except VSphereOperationError as err:
             raise HomeAssistantError(f"Failed to execute {selected} on host {self._moref}: {err}") from err
 
