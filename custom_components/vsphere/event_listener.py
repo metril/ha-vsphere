@@ -350,7 +350,9 @@ class VSphereEventListener:
                 d["mem_total_gb"] = round(val / (1024**3), 2)
         if "_vm_list" in d:
             val = d.pop("_vm_list")
-            d["vm_count"] = len(val) if val else 0
+            d["vm_count"] = (
+                sum(1 for vm in val if not getattr(getattr(vm, "config", None), "template", False)) if val else 0
+            )
 
     def _derive_vm_values(self, d: dict[str, Any]) -> None:
         """Compute derived VM values from raw inputs."""

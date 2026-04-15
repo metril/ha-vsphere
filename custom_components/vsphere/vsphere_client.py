@@ -1486,8 +1486,12 @@ class VSphereClient:
             else:
                 data["mem_usage_gb"] = 0.0
 
-            # VM count
-            data["vm_count"] = len(host.vm) if host.vm else 0
+            # VM count (exclude templates)
+            data["vm_count"] = (
+                sum(1 for vm in host.vm if not getattr(getattr(vm, "config", None), "template", False))
+                if host.vm
+                else 0
+            )
 
             # Power policy
             try:
