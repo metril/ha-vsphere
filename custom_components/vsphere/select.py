@@ -147,7 +147,10 @@ class HostPowerPolicySelect(VSphereEntity, SelectEntity):
         obj_data = self._get_data()
         if obj_data is None:
             return None
-        return obj_data.get("power_policy") or None
+        policy = obj_data.get("power_policy")
+        if policy and policy in self.options:
+            return policy
+        return None
 
     async def async_select_option(self, option: str) -> None:
         """Change the host power policy."""

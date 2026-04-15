@@ -826,6 +826,8 @@ class VSphereClient:
         storage: dict[str, dict[str, Any]] = {}
         try:
             for vm_obj in container.view:
+                if getattr(getattr(vm_obj, "config", None), "template", False):
+                    continue
                 vm_moref = str(vm_obj._moId)  # noqa: SLF001
                 try:
                     vm_name = vm_obj.summary.config.name
@@ -1570,10 +1572,14 @@ class VSphereClient:
                 data["host_moref"] = ""
                 data["host_name"] = ""
 
+            # Store max CPU for push path derivation
+            if runtime and runtime.maxCpuUsage:
+                data["max_cpu_mhz"] = runtime.maxCpuUsage
+
             # Running-only metrics
             if raw_state == "poweredOn" and quick:
-                if quick.overallCpuUsage is not None and runtime and runtime.maxCpuUsage:
-                    data["cpu_use_pct"] = round(quick.overallCpuUsage / runtime.maxCpuUsage * 100, 1)
+                if quick.overallCpuUsage is not None and data.get("max_cpu_mhz"):
+                    data["cpu_use_pct"] = round(quick.overallCpuUsage / data["max_cpu_mhz"] * 100, 2)
                 else:
                     data["cpu_use_pct"] = 0.0
 

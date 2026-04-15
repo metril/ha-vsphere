@@ -289,7 +289,7 @@ class VSphereEventListener:
             )
 
         # Translate raw PropertyCollector paths to flat entity keys
-        translated = self._translate_properties(category, properties)
+        translated = self._translate_properties(category, properties, moref)
 
         self._hass.loop.call_soon_threadsafe(
             self._vsphere_data.async_update_from_push,
@@ -298,7 +298,9 @@ class VSphereEventListener:
             translated,
         )
 
-    def _translate_properties(self, category: str, raw_props: dict[str, Any]) -> dict[str, Any]:
+    def _translate_properties(
+        self, category: str, raw_props: dict[str, Any], moref: str | None = None
+    ) -> dict[str, Any]:
         """Translate raw PropertyCollector paths to flat entity keys with derived values."""
         if category == "hosts":
             prop_map = _HOST_PROP_MAP
@@ -314,10 +316,12 @@ class VSphereEventListener:
             flat_key = prop_map.get(raw_key)
             translated[flat_key if flat_key else raw_key] = value
 
+        # Pass existing stored data for lookups (e.g., max_cpu_mhz for CPU % derivation)
+        stored = self._vsphere_data._data.get(category, {}).get(moref, {}) if moref else {}  # noqa: SLF001
         if category == "hosts":
             self._derive_host_values(translated)
         elif category == "vms":
-            self._derive_vm_values(translated)
+            self._derive_vm_values(translated, stored)
         elif category == "datastores":
             self._derive_datastore_values(translated)
 
@@ -354,7 +358,7 @@ class VSphereEventListener:
                 sum(1 for vm in val if not getattr(getattr(vm, "config", None), "template", False)) if val else 0
             )
 
-    def _derive_vm_values(self, d: dict[str, Any]) -> None:
+    def _derive_vm_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived VM values from raw inputs."""
         if "power_state" in d:
             ps = str(d["power_state"])
@@ -363,13 +367,13 @@ class VSphereEventListener:
             val = d.pop("_uptime_raw")
             if val is not None:
                 d["uptime_hours"] = round(val / 3600, 2)
-        if "_cpu_usage_raw" in d and "_max_cpu" in d:
-            usage, max_cpu = d.pop("_cpu_usage_raw"), d.pop("_max_cpu")
-            if usage and max_cpu:
+        if "_max_cpu" in d:
+            d["max_cpu_mhz"] = d.pop("_max_cpu")
+        if "_cpu_usage_raw" in d:
+            usage = d.pop("_cpu_usage_raw")
+            max_cpu = d.get("max_cpu_mhz") or (stored or {}).get("max_cpu_mhz")
+            if usage is not None and max_cpu:
                 d["cpu_use_pct"] = round((usage / max_cpu) * 100, 2)
-        else:
-            d.pop("_cpu_usage_raw", None)
-            d.pop("_max_cpu", None)
         if "_storage_raw" in d:
             val = d.pop("_storage_raw")
             if val:
@@ -408,6 +412,8 @@ class VSphereEventListener:
             val = d.pop("_free_raw")
             if val:
                 d["free_gb"] = round(val / (1024**3), 2)
+        if "capacity_gb" in d and "free_gb" in d:
+            d["used_gb"] = round(max(d["capacity_gb"] - d["free_gb"], 0.0), 2)
         if "_host_list" in d:
             val = d.pop("_host_list")
             d["connected_hosts"] = len(val) if val else 0
@@ -456,12 +462,15 @@ class VSphereEventListener:
         if not self._categories.get(Category.EVENTS_ALARMS):
             return
 
-        # Detect power state changes
-        power_key = "summary.runtime.powerState" if category == "hosts" else "runtime.powerState"
-        if power_key not in properties:
+        # Detect power state changes (VMs may report via either property path)
+        if category == "hosts":
+            power_val = properties.get("summary.runtime.powerState")
+        else:
+            power_val = properties.get("runtime.powerState") or properties.get("summary.runtime.powerState")
+        if power_val is None:
             return
 
-        new_state = str(properties[power_key])
+        new_state = str(power_val)
         entity_type = category.rstrip("s")
 
         # Map power state to event class name

@@ -214,10 +214,9 @@ def _async_cleanup_stale_entities(
     if categories.get("licenses"):
         valid_morefs.update(coordinator.data.get("licenses", {}).keys())
     if categories.get("events_alarms"):
-        # Alarm entities are on host/VM morefs (already in valid_morefs if those categories enabled)
+        # Alarm entities live on host/VM morefs regardless of whether those categories are enabled
         for cat_key in ("hosts", "vms"):
-            if categories.get(cat_key):
-                valid_morefs.update(coordinator.data.get(cat_key, {}).keys())
+            valid_morefs.update(coordinator.data.get(cat_key, {}).keys())
 
     # Remove entities whose moref is no longer valid
     prefix = f"{entry.entry_id}_"
