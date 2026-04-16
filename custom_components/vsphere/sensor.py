@@ -426,14 +426,6 @@ DVSWITCH_SENSORS: tuple[VSphereSensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: d.get("version"),
     ),
-    VSphereSensorDescription(
-        key="nioc_enabled",
-        translation_key="nioc_enabled",
-        name="NIOC Enabled",
-        icon="mdi:traffic-light",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: d.get("nioc_enabled"),
-    ),
 )
 
 DVPORTGROUP_SENSORS: tuple[VSphereSensorDescription, ...] = (

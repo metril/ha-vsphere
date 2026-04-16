@@ -41,7 +41,6 @@
             "max_ports": { "name": "Max Ports" },
             "dvs_num_hosts": { "name": "Connected Hosts" },
             "dvs_version": { "name": "Version" },
-            "nioc_enabled": { "name": "NIOC Enabled" },
             "port_binding": { "name": "Port Binding" },
             "cpu_reservation_mhz": { "name": "CPU Reservation" },
             "cpu_limit_mhz": { "name": "CPU Limit" },
@@ -74,6 +73,7 @@
             "ha_enabled": { "name": "HA Enabled" },
             "ha_admission_control": { "name": "HA Admission Control" },
             "link_up": { "name": "Link Up" },
+            "nioc_enabled": { "name": "NIOC Enabled" },
             "alarm_active": { "name": "Alarm" }
         },
         "switch": {

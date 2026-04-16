@@ -114,6 +114,15 @@ PNIC_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
     ),
 )
 
+DVSWITCH_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
+    VSphereBinarySensorDescription(
+        key="nioc_enabled",
+        translation_key="nioc_enabled",
+        name="NIOC Enabled",
+        value_fn=lambda d: bool(d.get("nioc_enabled")),
+    ),
+)
+
 # ---------------------------------------------------------------------------
 # Alarm binary sensors (per-entity, keyed by moref in coordinator data["alarms"])
 # ---------------------------------------------------------------------------
@@ -168,29 +177,51 @@ async def async_setup_entry(
                     )
                 )
 
-    # Network binary sensors: pNIC link_up attached to parent Host device
+    # Network binary sensors
     if categories.get("network"):
         hosts_data = coordinator.data.get("hosts", {})
+        _net_binary_map: dict[str, tuple[VSphereBinarySensorDescription, ...]] = {
+            "pnic": PNIC_BINARY_SENSORS,
+            "dvswitch": DVSWITCH_BINARY_SENSORS,
+        }
         for net_moref, obj_data in coordinator.data.get("networks", {}).items():
-            if obj_data.get("type") != "pnic":
+            net_type = obj_data.get("type", "")
+            type_descriptions = _net_binary_map.get(net_type, ())
+            if not type_descriptions:
                 continue
             name = obj_data.get("name", net_moref)
-            host_moref = obj_data.get("host_moref", net_moref.split("_")[0] if "_" in net_moref else "")
-            host_name = hosts_data.get(host_moref, {}).get("name", host_moref)
-            for description in PNIC_BINARY_SENSORS:
-                entities.append(
-                    VSphereChildBinarySensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        parent_object_type="hosts",
-                        parent_moref=host_moref,
-                        parent_name=host_name,
-                        data_category="networks",
-                        data_moref=net_moref,
-                        description=description,
-                        entity_name=name,
+            host_moref = obj_data.get("host_moref", "")
+            if host_moref:
+                host_name = hosts_data.get(host_moref, {}).get("name", host_moref)
+                for description in type_descriptions:
+                    entities.append(
+                        VSphereChildBinarySensor(
+                            coordinator=coordinator,
+                            entry=entry,
+                            parent_object_type="hosts",
+                            parent_moref=host_moref,
+                            parent_name=host_name,
+                            data_category="networks",
+                            data_moref=net_moref,
+                            description=description,
+                            entity_name=name,
+                        )
                     )
-                )
+            else:
+                for description in type_descriptions:
+                    entities.append(
+                        VSphereChildBinarySensor(
+                            coordinator=coordinator,
+                            entry=entry,
+                            parent_object_type="root",
+                            parent_moref=entry.entry_id,
+                            parent_name=entry.title,
+                            data_category="networks",
+                            data_moref=net_moref,
+                            description=description,
+                            entity_name=name,
+                        )
+                    )
 
     # Alarm status binary sensors — created for each host/VM when events_alarms is enabled
     if categories.get(Category.EVENTS_ALARMS):
