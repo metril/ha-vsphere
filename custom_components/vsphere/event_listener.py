@@ -354,10 +354,15 @@ class VSphereEventListener:
                 d["mem_total_gb"] = round(val / (1024**3), 2)
         if "_vm_list" in d:
             val = d.pop("_vm_list")
-            # Count all VMs without accessing vm.config (would trigger live RPC on push thread).
-            # Templates are excluded in the initial fetch; push count may include them but the
-            # next full fetch (reconnect) corrects it.
-            d["vm_count"] = len(val) if val else 0
+            # Count running VMs by cross-referencing against stored coordinator VM data.
+            # Cannot access vm.runtime.powerState directly — would trigger live RPCs on push thread.
+            stored_vms = self._vsphere_data._data.get("vms", {})  # noqa: SLF001
+            if val and stored_vms:
+                d["vm_count"] = sum(
+                    1 for vm in val if stored_vms.get(getattr(vm, "_moId", ""), {}).get("power_state") == "poweredOn"
+                )
+            else:
+                d["vm_count"] = 0
 
     def _derive_vm_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived VM values from raw inputs."""

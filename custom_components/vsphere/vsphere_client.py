@@ -286,11 +286,7 @@ class VSphereClient:
                             "total_memory_mb": round(summary.totalMemory / (1024 * 1024), 0)
                             if summary and summary.totalMemory
                             else 0,
-                            "vm_count": sum(
-                                1
-                                for vm in cluster.resourcePool.vm
-                                if not getattr(getattr(vm, "config", None), "template", False)
-                            )
+                            "vm_count": len(cluster.resourcePool.vm)
                             if cluster.resourcePool and cluster.resourcePool.vm
                             else 0,
                         }
@@ -464,11 +460,7 @@ class VSphereClient:
                             "cpu_limit_mhz": cpu_alloc.limit if cpu_alloc else -1,
                             "memory_reservation_mb": mem_alloc.reservation if mem_alloc else 0,
                             "memory_limit_mb": mem_alloc.limit if mem_alloc else -1,
-                            "vm_count": sum(
-                                1 for vm in pool.vm if not getattr(getattr(vm, "config", None), "template", False)
-                            )
-                            if pool.vm
-                            else 0,
+                            "vm_count": len(pool.vm) if pool.vm else 0,
                         }
                     except Exception:  # noqa: BLE001
                         _LOGGER.debug("Error parsing resource pool %s", moref, exc_info=True)
@@ -1568,9 +1560,9 @@ class VSphereClient:
             else:
                 data["mem_usage_gb"] = 0.0
 
-            # VM count (exclude templates)
+            # Running VM count (only poweredOn VMs)
             data["vm_count"] = (
-                sum(1 for vm in host.vm if not getattr(getattr(vm, "config", None), "template", False))
+                sum(1 for vm in host.vm if getattr(getattr(vm, "runtime", None), "powerState", None) == "poweredOn")
                 if host.vm
                 else 0
             )
