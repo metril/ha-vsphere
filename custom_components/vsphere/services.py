@@ -156,17 +156,24 @@ def _resolve_device(hass: HomeAssistant, device_id: str) -> tuple[Any, Any, str,
     for identifier in device.identifiers:
         if len(identifier) == 2 and identifier[0] == DOMAIN:
             raw = identifier[1]
-            # Format: "{entry_id}_{moref}"
-            # entry_id is a 32-char hex string; moref can contain underscores
-            # Split on first underscore to separate entry_id from rest
+            # Format: "{entry_id}_{moref}" for child devices, or bare "{entry_id}" for root.
+            # entry_id is a 32-char hex string (no underscores); moref can contain underscores.
             parts = raw.split("_", 1)
             if len(parts) == 2:
                 entry_id = parts[0]
                 moref = parts[1]
                 break
+            # Root device: identifier is just the entry_id with no moref suffix
+            entry_id = parts[0]
+            moref = ""
+            break
 
-    if entry_id is None or moref is None:
-        raise HomeAssistantError(f"Cannot extract vSphere moref from device identifiers for device '{device_id}'")
+    if entry_id is None:
+        raise HomeAssistantError(f"Cannot extract vSphere identifiers from device '{device_id}'")
+    if not moref:
+        raise HomeAssistantError(
+            "This service must target a specific host or VM device, not the root vCenter/ESXi device"
+        )
 
     domain_data: dict[str, Any] = hass.data.get(DOMAIN, {})
     entry_data: dict[str, Any] = domain_data.get(entry_id, {})
@@ -357,9 +364,15 @@ async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> No
                 raise HomeAssistantError(str(err)) from err
             return  # "all" removes everything, no need to continue
 
-        snap_moref = next((s["moref"] for s in snapshots if s["name"] == snap_name), None)
-        if snap_moref is None:
+        matches = [s for s in snapshots if s["name"] == snap_name]
+        if not matches:
             raise HomeAssistantError(f"Snapshot '{snap_name}' not found on VM {vm_moref}")
+        if len(matches) > 1:
+            raise HomeAssistantError(
+                f"Multiple snapshots named '{snap_name}' on VM {vm_moref}; "
+                f"use the snapshot select entity or remove all to disambiguate"
+            )
+        snap_moref = matches[0]["moref"]
         try:
             await hass.async_add_executor_job(client.remove_snapshot_by_moref, vm_moref, snap_moref)
         except (VSphereOperationError, VSphereConnectionError) as err:

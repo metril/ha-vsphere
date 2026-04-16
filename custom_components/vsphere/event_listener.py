@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import threading
@@ -200,7 +201,15 @@ class VSphereEventListener:
                     len(self._vm_power_cache),
                 )
 
-            self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
+            # Block until async_set_initial_data has executed on the event loop.
+            # This prevents push updates from writing into coordinator data that is
+            # about to be replaced, and ensures _initial_fetch_in_progress is only
+            # cleared AFTER the coordinator has the fresh data.
+            async def _commit() -> None:
+                self._vsphere_data.async_set_initial_data(initial_data)
+
+            future = asyncio.run_coroutine_threadsafe(_commit(), self._hass.loop)
+            future.result(timeout=10)
         finally:
             self._initial_fetch_in_progress = False
         _LOGGER.info(
