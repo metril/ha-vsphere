@@ -89,7 +89,9 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
             return
         for host_moref, host_data in hosts.items():
             host_data["vm_count"] = sum(
-                1 for vm in vms.values() if vm.get("host_moref") == host_moref and vm.get("power_state") == "poweredOn"
+                1
+                for vm in vms.values()
+                if vm.get("host_moref") == host_moref and str(vm.get("power_state", "")) == "poweredOn"
             )
 
     @callback
