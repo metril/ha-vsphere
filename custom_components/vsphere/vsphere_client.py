@@ -1422,6 +1422,7 @@ class VSphereClient:
             "runtime.maxCpuUsage",
             "snapshot",
             "configStatus",
+            "config.template",
         ]
 
         # Add alarm properties if events_alarms is enabled

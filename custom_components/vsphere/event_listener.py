@@ -208,8 +208,12 @@ class VSphereEventListener:
             async def _commit() -> None:
                 self._vsphere_data.async_set_initial_data(initial_data)
 
-            future = asyncio.run_coroutine_threadsafe(_commit(), self._hass.loop)
-            future.result(timeout=10)
+            if self._stop_event.is_set():
+                # HA is shutting down — skip the blocking commit
+                self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
+            else:
+                future = asyncio.run_coroutine_threadsafe(_commit(), self._hass.loop)
+                future.result(timeout=10)
         finally:
             self._initial_fetch_in_progress = False
         _LOGGER.info(
@@ -416,7 +420,7 @@ class VSphereEventListener:
 
     def _derive_vm_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived VM values from raw inputs."""
-        if "power_state" in d:
+        if d.get("power_state") is not None:
             d["power_state"] = str(d["power_state"])
             d["state"] = {"poweredOn": "running", "poweredOff": "off", "suspended": "suspended"}.get(
                 d["power_state"], d["power_state"]
@@ -532,15 +536,22 @@ class VSphereEventListener:
                 self._hass.loop.call_soon_threadsafe(self._vsphere_data.adjust_host_vm_count, old_host, -1)
             return
 
-        # Extract power state and host from the changeset
+        # Extract power state, host, and template flag from the changeset
         new_power: str | None = None
         new_host_moref: str | None = None
+        is_template = False
         for change in change_set:
             if change.name in ("runtime.powerState", "summary.runtime.powerState"):
                 new_power = str(change.val) if change.val else ""
             elif change.name == "runtime.host" and change.val:
                 with contextlib.suppress(Exception):
                     new_host_moref = str(change.val._moId)  # noqa: SLF001
+            elif change.name == "config.template" and change.val:
+                is_template = True
+
+        # Skip template VMs — they don't count as running VMs
+        if is_template:
+            return
 
         if new_power is None and new_host_moref is None:
             return  # no relevant changes
