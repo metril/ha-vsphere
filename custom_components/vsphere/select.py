@@ -11,7 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, SNAP_SELECT_ALL, HostAction, VmAction
 from .entity import VSphereEntity
-from .exceptions import VSphereOperationError
+from .exceptions import VSphereConnectionError, VSphereOperationError
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -158,7 +158,7 @@ class HostPowerPolicySelect(VSphereEntity, SelectEntity):
             raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.POWER_POLICY))
         try:
             await self.hass.async_add_executor_job(self._client.host_set_power_policy, self._moref, option)
-        except VSphereOperationError as err:
+        except (VSphereOperationError, VSphereConnectionError) as err:
             raise HomeAssistantError(f"Failed to set power policy on host {self._moref}: {err}") from err
 
 

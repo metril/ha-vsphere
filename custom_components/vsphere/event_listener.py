@@ -107,6 +107,9 @@ class VSphereEventListener:
         # (host_moref, power_state) so we can send deltas to the coordinator.
         # Populated by the batch query in _do_initial_fetch, updated by push.
         self._vm_power_cache: dict[str, tuple[str, str]] = {}
+        # Suppresses delta dispatch during initial fetch / reconnect to prevent
+        # double-counting when the push loop re-delivers enter events.
+        self._initial_fetch_in_progress = False
 
     def start(self) -> None:
         """Start listener (called from executor). Connects, fetches initial data, starts loop."""
@@ -147,6 +150,7 @@ class VSphereEventListener:
 
     def _do_initial_fetch(self) -> None:
         """Fetch full state via poll connection to populate VSphereData."""
+        self._initial_fetch_in_progress = True
         self._client.ensure_poll_connection()
         initial_data: dict[str, Any] = {}
 
@@ -178,7 +182,7 @@ class VSphereEventListener:
             try:
                 vm_counts, self._vm_power_cache = self._client.count_running_vms_by_host()
             except Exception:  # noqa: BLE001
-                _LOGGER.debug("Batch VM count failed, falling back to fetched VM data", exc_info=True)
+                _LOGGER.warning("Batch VM count failed; counts may only reflect monitored VMs", exc_info=True)
                 self._vm_power_cache = {}
                 if "vms" in initial_data:
                     for vm_moref, vm in initial_data["vms"].items():
@@ -196,6 +200,7 @@ class VSphereEventListener:
             )
 
         self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
+        self._initial_fetch_in_progress = False
         _LOGGER.info(
             "Initial fetch: %d hosts, %d VMs, %d datastores, %d licenses, "
             "%d clusters, %d networks, %d resource_pools, %d alarm entities, %d storage objects",
@@ -276,22 +281,27 @@ class VSphereEventListener:
         if category == "vms":
             self._track_vm_power_delta(moref, kind, obj_update.changeSet)
 
+        # Skip objects not in the entity filter (applies to all update kinds including leave)
+        filter_config: dict[str, Any] = self._entity_filter.get(category, {})
+        is_filtered_out = filter_config.get("mode", "all") == "select" and moref not in set(
+            filter_config.get("morefs", [])
+        )
+
         if kind == "leave":
-            self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_remove_object, category, moref)
-            self._fire_event(
-                "vsphere_inventory_change",
-                {
-                    "entry_id": self._entry_id,
-                    "action": "removed",
-                    "entity_type": category.rstrip("s"),
-                    "entity_moref": moref,
-                },
-            )
+            if not is_filtered_out:
+                self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_remove_object, category, moref)
+                self._fire_event(
+                    "vsphere_inventory_change",
+                    {
+                        "entry_id": self._entry_id,
+                        "action": "removed",
+                        "entity_type": category.rstrip("s"),
+                        "entity_moref": moref,
+                    },
+                )
             return
 
-        # Skip objects not in the entity filter (applies to all update kinds)
-        filter_config: dict[str, Any] = self._entity_filter.get(category, {})
-        if filter_config.get("mode", "all") == "select" and moref not in set(filter_config.get("morefs", [])):
+        if is_filtered_out:
             return
 
         properties: dict[str, Any] = {}
@@ -375,8 +385,12 @@ class VSphereEventListener:
             if val is not None:
                 d["mem_usage_gb"] = round(val / 1024, 2)
         if "_cpu_mhz" in d or "_cpu_cores" in d:
-            mhz = d.pop("_cpu_mhz", None) or (stored or {}).get("cpu_mhz")
-            cores = d.pop("_cpu_cores", None) or (stored or {}).get("cpu_cores")
+            mhz = d.pop("_cpu_mhz", None)
+            if mhz is None:
+                mhz = (stored or {}).get("cpu_mhz")
+            cores = d.pop("_cpu_cores", None)
+            if cores is None:
+                cores = (stored or {}).get("cpu_cores")
             if mhz and cores:
                 d["cpu_total_ghz"] = round(mhz * cores / 1000, 2)
                 d["cpu_mhz"] = mhz
@@ -448,8 +462,8 @@ class VSphereEventListener:
             if val is not None:
                 d["free_gb"] = round(val / (1024**3), 2)
         # Recompute used_gb from whichever values are available (delta or stored)
-        cap = d.get("capacity_gb") or (stored or {}).get("capacity_gb")
-        free = d.get("free_gb") or (stored or {}).get("free_gb")
+        cap = d.get("capacity_gb") if "capacity_gb" in d else (stored or {}).get("capacity_gb")
+        free = d.get("free_gb") if "free_gb" in d else (stored or {}).get("free_gb")
         if cap is not None and free is not None:
             d["used_gb"] = round(max(cap - free, 0.0), 2)
         if "_host_list" in d:
@@ -503,7 +517,7 @@ class VSphereEventListener:
         """
         if kind == "leave":
             old_host, old_state = self._vm_power_cache.pop(vm_moref, ("", ""))
-            if old_host and old_state == "poweredOn":
+            if not self._initial_fetch_in_progress and old_host and old_state == "poweredOn":
                 self._hass.loop.call_soon_threadsafe(self._vsphere_data.adjust_host_vm_count, old_host, -1)
             return
 
@@ -515,7 +529,7 @@ class VSphereEventListener:
                 new_power = str(change.val) if change.val else ""
             elif change.name == "runtime.host" and change.val:
                 with contextlib.suppress(Exception):
-                    new_host_moref = change.val._moId  # noqa: SLF001
+                    new_host_moref = str(change.val._moId)  # noqa: SLF001
 
         if new_power is None and new_host_moref is None:
             return  # no relevant changes
@@ -524,8 +538,12 @@ class VSphereEventListener:
         cur_host = new_host_moref if new_host_moref is not None else old_host
         cur_state = new_power if new_power is not None else old_state
 
-        # Update cache
+        # Always update cache (needed for subsequent deltas)
         self._vm_power_cache[vm_moref] = (cur_host, cur_state)
+
+        # Suppress delta dispatch during initial fetch — batch count is authoritative
+        if self._initial_fetch_in_progress:
+            return
 
         was_on = old_state == "poweredOn"
         is_on = cur_state == "poweredOn"
@@ -661,8 +679,7 @@ class VSphereEventListener:
     def _reconnect(self) -> None:
         """Disconnect and reconnect the push connection, re-creating the property filter."""
         _LOGGER.info("Reconnecting event listener")
-        self._client.disconnect_push()
-        self._client.connect_push()
+        # Destroy filter and containers on the old session BEFORE disconnect
         if self._pc_filter:
             with contextlib.suppress(Exception):
                 self._pc_filter.Destroy()
@@ -670,6 +687,8 @@ class VSphereEventListener:
             with contextlib.suppress(Exception):
                 container.Destroy()
         self._containers = []
+        self._client.disconnect_push()
+        self._client.connect_push()
         self._pc, self._pc_filter, self._containers = self._client.create_property_filter(
             self._categories, self._entity_filter
         )

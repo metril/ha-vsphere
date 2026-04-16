@@ -371,7 +371,7 @@ class VSphereClient:
                     host_moref = host._moId  # noqa: SLF001
                     try:
                         host_name = host.summary.config.name
-                        if host.summary.runtime.powerState != "poweredOn":
+                        if str(host.summary.runtime.powerState) != "poweredOn":
                             continue
                         net_sys = host.configManager.networkSystem
                         if not net_sys:
@@ -787,7 +787,7 @@ class VSphereClient:
             group = counter.groupInfo.key
             name = counter.nameInfo.key
             rollup = counter.rollupType
-            key = f"{group}.{name}.{rollup}"
+            key = f"{group}.{name}.{str(rollup)}"
             counters[key] = counter.key
         self._counter_cache = counters
         return counters

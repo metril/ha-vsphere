@@ -103,8 +103,28 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
 
     @callback
     def async_set_initial_data(self, data: dict[str, Any]) -> None:
-        """Set initial data from EventListener's first fetch."""
-        self._data.update(data)
+        """Set initial data from EventListener's first fetch.
+
+        Replaces category dicts entirely (not merged) so that objects removed
+        during a disconnect don't persist as stale entries.
+        """
+        for key in (
+            "hosts",
+            "vms",
+            "datastores",
+            "licenses",
+            "clusters",
+            "networks",
+            "resource_pools",
+            "alarms",
+            "storage_advanced",
+        ):
+            if key in data:
+                self._data[key] = data[key]
+        # Merge any non-category keys (e.g. connection_info)
+        for key, value in data.items():
+            if key not in self._data:
+                self._data[key] = value
         self.data = self._data
         self.async_set_updated_data(self._data)
         self.initial_data_ready.set()

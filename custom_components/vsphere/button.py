@@ -17,7 +17,7 @@ from .const import (
     VmAction,
 )
 from .entity import VSphereEntity
-from .exceptions import VSphereOperationError
+from .exceptions import VSphereConnectionError, VSphereOperationError
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -170,7 +170,7 @@ class VmPowerExecuteButton(_PowerExecuteButton):
             raise HomeAssistantError(self._resolver.explain("vms", self._moref, action_enum))
         try:
             await self.hass.async_add_executor_job(self._client.vm_power, self._moref, client_action)
-        except VSphereOperationError as err:
+        except (VSphereOperationError, VSphereConnectionError) as err:
             raise HomeAssistantError(f"Failed to execute {selected} on VM {self._moref}: {err}") from err
 
 
@@ -211,7 +211,7 @@ class HostPowerExecuteButton(_PowerExecuteButton):
             raise HomeAssistantError(self._resolver.explain("hosts", self._moref, action_enum))
         try:
             await self.hass.async_add_executor_job(self._client.host_power, self._moref, client_action, True)
-        except VSphereOperationError as err:
+        except (VSphereOperationError, VSphereConnectionError) as err:
             raise HomeAssistantError(f"Failed to execute {selected} on host {self._moref}: {err}") from err
 
 
@@ -245,7 +245,7 @@ class VmSnapshotCreateButton(_VSphereButton):
             raise HomeAssistantError(self._resolver.explain("vms", self._moref, VmAction.SNAPSHOT_CREATE))
         try:
             await self.hass.async_add_executor_job(self._client.create_snapshot, self._moref)
-        except VSphereOperationError as err:
+        except (VSphereOperationError, VSphereConnectionError) as err:
             raise HomeAssistantError(f"Failed to create snapshot for VM {self._moref}: {err}") from err
 
 
@@ -311,5 +311,5 @@ class VmSnapshotRemoveButton(_VSphereButton):
                 if snap_moref is None:
                     raise HomeAssistantError(f"Snapshot '{selected}' not found on VM {self._moref}")
                 await self.hass.async_add_executor_job(self._client.remove_snapshot_by_moref, self._moref, snap_moref)
-        except VSphereOperationError as err:
+        except (VSphereOperationError, VSphereConnectionError) as err:
             raise HomeAssistantError(f"Failed to remove snapshot on VM {self._moref}: {err}") from err

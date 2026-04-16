@@ -11,7 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, HostAction
 from .entity import VSphereEntity
-from .exceptions import VSphereOperationError
+from .exceptions import VSphereConnectionError, VSphereOperationError
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -92,7 +92,7 @@ class HostMaintenanceSwitch(VSphereEntity, SwitchEntity):
             raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.MAINTENANCE))
         try:
             await self.hass.async_add_executor_job(self._client.host_set_maintenance_mode, self._moref, True)
-        except VSphereOperationError as err:
+        except (VSphereOperationError, VSphereConnectionError) as err:
             raise HomeAssistantError(f"Failed to enter maintenance mode on host {self._moref}: {err}") from err
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -101,5 +101,5 @@ class HostMaintenanceSwitch(VSphereEntity, SwitchEntity):
             raise HomeAssistantError(self._resolver.explain("hosts", self._moref, HostAction.MAINTENANCE))
         try:
             await self.hass.async_add_executor_job(self._client.host_set_maintenance_mode, self._moref, False)
-        except VSphereOperationError as err:
+        except (VSphereOperationError, VSphereConnectionError) as err:
             raise HomeAssistantError(f"Failed to exit maintenance mode on host {self._moref}: {err}") from err
