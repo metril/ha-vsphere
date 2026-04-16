@@ -76,32 +76,23 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 properties["moref"] = moref
                 self._data[category][moref] = properties
-        # Recompute host running VM count when a VM's power state changes
-        if category == "vms" and "power_state" in properties:
-            self._recompute_host_vm_counts()
         self.async_set_updated_data(self._data)
 
-    def _recompute_host_vm_counts(self) -> None:
-        """Recompute running VM counts for all hosts from stored VM data."""
-        hosts = self._data.get("hosts", {})
-        vms = self._data.get("vms", {})
-        if not hosts:
+    @callback
+    def adjust_host_vm_count(self, host_moref: str, delta: int) -> None:
+        """Adjust a host's running VM count by a delta (+1 or -1).
+
+        Called by EventListener when ANY VM (monitored or not) changes power state.
+        The initial count comes from a batch PropertyCollector query that counts
+        ALL VMs, so push deltas keep it accurate regardless of which VMs are monitored.
+        """
+        host_data = self._data.get("hosts", {}).get(host_moref)
+        if not host_data:
             return
-        for host_moref, host_data in hosts.items():
-            old_count = host_data.get("vm_count", 0)
-            host_data["vm_count"] = sum(
-                1
-                for vm in vms.values()
-                if vm.get("host_moref") == host_moref and str(vm.get("power_state", "")) == "poweredOn"
-            )
-            if host_data["vm_count"] != old_count:
-                _LOGGER.debug(
-                    "Host %s vm_count: %d → %d (from %d stored VMs)",
-                    host_moref,
-                    old_count,
-                    host_data["vm_count"],
-                    len(vms),
-                )
+        old_count = host_data.get("vm_count", 0)
+        host_data["vm_count"] = max(0, old_count + delta)
+        _LOGGER.debug("Host %s vm_count: %d → %d", host_moref, old_count, host_data["vm_count"])
+        self.async_set_updated_data(self._data)
 
     @callback
     def async_remove_object(self, category: str, moref: str) -> None:

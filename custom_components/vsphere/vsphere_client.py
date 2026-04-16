@@ -206,11 +206,15 @@ class VSphereClient:
         finally:
             self._disconnect(conn)
 
-    def count_running_vms_by_host(self) -> dict[str, int]:
+    def count_running_vms_by_host(self) -> tuple[dict[str, int], dict[str, tuple[str, str]]]:
         """Batch-count running (non-template) VMs per host using PropertyCollector.
 
-        Returns a dict mapping host moref → count of poweredOn VMs.
-        Uses a single RetrievePropertiesEx call (efficient, no per-VM RPCs).
+        Returns:
+            Tuple of (counts, vm_power_cache) where:
+            - counts: host moref → number of poweredOn non-template VMs
+            - vm_power_cache: vm moref → (host_moref, power_state) for ALL
+              non-template VMs.  EventListener uses this cache to track deltas
+              on subsequent PropertyCollector push updates.
         """
         conn = self._connect()
         try:
@@ -235,10 +239,12 @@ class VSphereClient:
                 result = pc.RetrievePropertiesEx(specSet=[filter_spec], options=options)
 
                 counts: dict[str, int] = {}
+                cache: dict[str, tuple[str, str]] = {}
                 while result:
                     for obj_content in result.objects:
-                        power_state = None
-                        host_moref = None
+                        vm_moref = obj_content.obj._moId  # noqa: SLF001
+                        power_state = ""
+                        host_moref = ""
                         is_template = False
                         for prop in obj_content.propSet or []:
                             if prop.name == "runtime.powerState":
@@ -247,13 +253,15 @@ class VSphereClient:
                                 host_moref = prop.val._moId  # noqa: SLF001
                             elif prop.name == "config.template":
                                 is_template = bool(prop.val)
-                        if host_moref and power_state == "poweredOn" and not is_template:
-                            counts[host_moref] = counts.get(host_moref, 0) + 1
+                        if not is_template:
+                            cache[vm_moref] = (host_moref, power_state)
+                            if host_moref and power_state == "poweredOn":
+                                counts[host_moref] = counts.get(host_moref, 0) + 1
                     if result.token:
                         result = pc.ContinueRetrievePropertiesEx(token=result.token)
                     else:
                         break
-                return counts
+                return counts, cache
             finally:
                 view.Destroy()
         finally:

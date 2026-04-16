@@ -103,6 +103,10 @@ class VSphereEventListener:
         self._event_baseline_time: float = 0.0
         # Local alarm state cache — written/read only on the background thread
         self._alarm_cache: dict[str, list[dict[str, Any]]] = {}
+        # VM power state cache for ALL VMs (not just monitored) — tracks
+        # (host_moref, power_state) so we can send deltas to the coordinator.
+        # Populated by the batch query in _do_initial_fetch, updated by push.
+        self._vm_power_cache: dict[str, tuple[str, str]] = {}
 
     def start(self) -> None:
         """Start listener (called from executor). Connects, fetches initial data, starts loop."""
@@ -167,25 +171,28 @@ class VSphereEventListener:
         if self._categories.get(Category.STORAGE_ADVANCED):
             initial_data["storage_advanced"] = self._client.get_vm_storage_details()
 
-        # Compute running VM counts per host.
-        # Primary: batch PropertyCollector query (works even when VMs category is off).
-        # Fallback: count from already-fetched VM data.
+        # Compute running VM counts per host via batch PropertyCollector query.
+        # Also populates _vm_power_cache for real-time delta tracking on push.
         if "hosts" in initial_data:
             vm_counts: dict[str, int] = {}
             try:
-                vm_counts = self._client.count_running_vms_by_host()
+                vm_counts, self._vm_power_cache = self._client.count_running_vms_by_host()
             except Exception:  # noqa: BLE001
                 _LOGGER.debug("Batch VM count failed, falling back to fetched VM data", exc_info=True)
+                self._vm_power_cache = {}
                 if "vms" in initial_data:
-                    for vm in initial_data["vms"].values():
-                        hm = vm.get("host_moref")
-                        if hm and str(vm.get("power_state", "")) == "poweredOn":
+                    for vm_moref, vm in initial_data["vms"].items():
+                        hm = vm.get("host_moref", "")
+                        ps = str(vm.get("power_state", ""))
+                        self._vm_power_cache[vm_moref] = (hm, ps)
+                        if hm and ps == "poweredOn":
                             vm_counts[hm] = vm_counts.get(hm, 0) + 1
             for host_moref, host_data in initial_data["hosts"].items():
                 host_data["vm_count"] = vm_counts.get(host_moref, 0)
             _LOGGER.info(
-                "Running VM counts per host: %s",
+                "Running VM counts per host: %s (tracking %d VMs for deltas)",
                 {m: initial_data["hosts"][m]["vm_count"] for m in initial_data["hosts"]},
+                len(self._vm_power_cache),
             )
 
         self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
@@ -263,6 +270,11 @@ class VSphereEventListener:
         category = self._obj_type_to_category(type(obj))
         if not category:
             return
+
+        # Track VM power/host changes for ALL VMs (before entity filter) so
+        # vm_count reflects the real running count, not just monitored VMs.
+        if category == "vms":
+            self._track_vm_power_delta(moref, kind, obj_update.changeSet)
 
         if kind == "leave":
             self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_remove_object, category, moref)
@@ -483,6 +495,53 @@ class VSphereEventListener:
         # Store the current time as our baseline — only fire events for changes after this point
         self._event_baseline_time = time.time()
 
+    def _track_vm_power_delta(self, vm_moref: str, kind: str, change_set: Any) -> None:
+        """Track a VM's power state / host for incremental vm_count updates.
+
+        Runs for ALL VMs (before entity filter) so the host Running VMs count
+        reflects reality regardless of which VMs are monitored as entities.
+        """
+        if kind == "leave":
+            old_host, old_state = self._vm_power_cache.pop(vm_moref, ("", ""))
+            if old_host and old_state == "poweredOn":
+                self._hass.loop.call_soon_threadsafe(self._vsphere_data.adjust_host_vm_count, old_host, -1)
+            return
+
+        # Extract power state and host from the changeset
+        new_power: str | None = None
+        new_host_moref: str | None = None
+        for change in change_set:
+            if change.name in ("runtime.powerState", "summary.runtime.powerState"):
+                new_power = str(change.val) if change.val else ""
+            elif change.name == "runtime.host" and change.val:
+                with contextlib.suppress(Exception):
+                    new_host_moref = change.val._moId  # noqa: SLF001
+
+        if new_power is None and new_host_moref is None:
+            return  # no relevant changes
+
+        old_host, old_state = self._vm_power_cache.get(vm_moref, ("", ""))
+        cur_host = new_host_moref if new_host_moref is not None else old_host
+        cur_state = new_power if new_power is not None else old_state
+
+        # Update cache
+        self._vm_power_cache[vm_moref] = (cur_host, cur_state)
+
+        was_on = old_state == "poweredOn"
+        is_on = cur_state == "poweredOn"
+
+        if old_host != cur_host:
+            # Host changed (vMotion or initial placement)
+            if was_on and old_host:
+                self._hass.loop.call_soon_threadsafe(self._vsphere_data.adjust_host_vm_count, old_host, -1)
+            if is_on and cur_host:
+                self._hass.loop.call_soon_threadsafe(self._vsphere_data.adjust_host_vm_count, cur_host, 1)
+        elif was_on != is_on:
+            # Same host, power state changed
+            delta = 1 if is_on else -1
+            if cur_host:
+                self._hass.loop.call_soon_threadsafe(self._vsphere_data.adjust_host_vm_count, cur_host, delta)
+
     def _check_and_fire_vsphere_events(self, category: str, moref: str, properties: dict[str, Any]) -> None:
         """Fire vsphere_event for significant property changes."""
         if not self._categories.get(Category.EVENTS_ALARMS):
@@ -615,4 +674,5 @@ class VSphereEventListener:
             self._categories, self._entity_filter
         )
         self._alarm_cache.clear()
+        self._vm_power_cache.clear()
         self._do_initial_fetch()
