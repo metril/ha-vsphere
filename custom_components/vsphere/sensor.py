@@ -385,6 +385,84 @@ PORTGROUP_SENSORS: tuple[VSphereSensorDescription, ...] = (
     ),
 )
 
+DVSWITCH_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="num_ports",
+        translation_key="num_ports",
+        name="Port Count",
+        icon="mdi:ethernet",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("num_ports"),
+    ),
+    VSphereSensorDescription(
+        key="max_ports",
+        translation_key="max_ports",
+        name="Max Ports",
+        icon="mdi:ethernet",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("max_ports"),
+    ),
+    VSphereSensorDescription(
+        key="mtu",
+        translation_key="mtu",
+        name="MTU",
+        icon="mdi:resize",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.get("mtu"),
+    ),
+    VSphereSensorDescription(
+        key="num_hosts",
+        translation_key="dvs_num_hosts",
+        name="Connected Hosts",
+        icon="mdi:server-network",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("num_hosts"),
+    ),
+    VSphereSensorDescription(
+        key="version",
+        translation_key="dvs_version",
+        name="Version",
+        icon="mdi:information-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.get("version"),
+    ),
+    VSphereSensorDescription(
+        key="nioc_enabled",
+        translation_key="nioc_enabled",
+        name="NIOC Enabled",
+        icon="mdi:traffic-light",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.get("nioc_enabled"),
+    ),
+)
+
+DVPORTGROUP_SENSORS: tuple[VSphereSensorDescription, ...] = (
+    VSphereSensorDescription(
+        key="vlan_id",
+        translation_key="vlan_id",
+        name="VLAN ID",
+        icon="mdi:lan",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.get("vlan_id"),
+    ),
+    VSphereSensorDescription(
+        key="port_binding",
+        translation_key="port_binding",
+        name="Port Binding",
+        icon="mdi:link-variant",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.get("port_binding"),
+    ),
+    VSphereSensorDescription(
+        key="num_ports",
+        translation_key="num_ports",
+        name="Port Count",
+        icon="mdi:ethernet",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d.get("num_ports"),
+    ),
+)
+
 # ---------------------------------------------------------------------------
 # Resource pool sensors
 # ---------------------------------------------------------------------------
@@ -686,35 +764,55 @@ async def async_setup_entry(
                 )
 
     # Network sensors: attach to parent Host device, read from "networks" data
+    # dvSwitch/dvPortgroup entities attach to root vCenter device (datacenter-level)
     if categories.get("network"):
         _network_type_map: dict[str, tuple[VSphereSensorDescription, ...]] = {
             "vswitch": VSWITCH_SENSORS,
             "pnic": PNIC_SENSORS,
             "portgroup": PORTGROUP_SENSORS,
+            "dvswitch": DVSWITCH_SENSORS,
+            "dvportgroup": DVPORTGROUP_SENSORS,
         }
-        # Build host name lookup for parent device attachment
         hosts_data = coordinator.data.get("hosts", {})
         for net_moref, obj_data in coordinator.data.get("networks", {}).items():
             net_type = obj_data.get("type", "")
             type_descriptions = _network_type_map.get(net_type, ())
             name = obj_data.get("name", net_moref)
-            # Extract host_moref from composite key (e.g., "host-42_vswitch_vSwitch0")
-            host_moref = obj_data.get("host_moref", net_moref.split("_")[0] if "_" in net_moref else "")
-            host_name = hosts_data.get(host_moref, {}).get("name", host_moref)
-            for description in type_descriptions:
-                entities.append(
-                    VSphereChildSensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        parent_object_type="hosts",
-                        parent_moref=host_moref,
-                        parent_name=host_name,
-                        data_category="networks",
-                        data_moref=net_moref,
-                        description=description,
-                        entity_name=name,
+            host_moref = obj_data.get("host_moref", "")
+
+            if host_moref:
+                # Standard vSwitch/pNIC/portgroup — child of host device
+                host_name = hosts_data.get(host_moref, {}).get("name", host_moref)
+                for description in type_descriptions:
+                    entities.append(
+                        VSphereChildSensor(
+                            coordinator=coordinator,
+                            entry=entry,
+                            parent_object_type="hosts",
+                            parent_moref=host_moref,
+                            parent_name=host_name,
+                            data_category="networks",
+                            data_moref=net_moref,
+                            description=description,
+                            entity_name=name,
+                        )
                     )
-                )
+            else:
+                # dvSwitch/dvPortgroup — child of root vCenter device
+                for description in type_descriptions:
+                    entities.append(
+                        VSphereChildSensor(
+                            coordinator=coordinator,
+                            entry=entry,
+                            parent_object_type="root",
+                            parent_moref=entry.entry_id,
+                            parent_name=entry.title,
+                            data_category="networks",
+                            data_moref=net_moref,
+                            description=description,
+                            entity_name=name,
+                        )
+                    )
 
     # Performance sensors — only created when performance category is enabled
     if categories.get("performance"):

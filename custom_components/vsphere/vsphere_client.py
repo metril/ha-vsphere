@@ -370,6 +370,61 @@ class VSphereClient:
                         _LOGGER.debug("Error parsing network info for host %s", host_moref, exc_info=True)
             finally:
                 view.Destroy()
+
+            # Distributed virtual switches (datacenter-level)
+            dvs_view = self._get_container_view(conn, [vim.DistributedVirtualSwitch])
+            try:
+                for dvs in dvs_view.view:
+                    dvs_moref = dvs._moId  # noqa: SLF001
+                    try:
+                        dvs_config = dvs.config
+                        dvs_summary = dvs.summary
+                        networks[dvs_moref] = {
+                            "moref": dvs_moref,
+                            "name": dvs.name,
+                            "type": "dvswitch",
+                            "num_ports": dvs_summary.numPorts if dvs_summary else 0,
+                            "max_ports": dvs_config.maxPorts if dvs_config else 0,
+                            "mtu": dvs_config.maxMtu if dvs_config else 0,
+                            "num_hosts": dvs_summary.numHosts if dvs_summary else 0,
+                            "version": dvs_config.productInfo.version if dvs_config and dvs_config.productInfo else "",
+                            "nioc_enabled": bool(getattr(dvs_config, "networkResourceManagementEnabled", False)),
+                            "host_moref": "",
+                            "host_name": "",
+                        }
+
+                        # Distributed port groups on this dvSwitch
+                        for pg in dvs.portgroup or []:
+                            pg_moref = pg._moId  # noqa: SLF001
+                            try:
+                                pg_config = pg.config
+                                vlan_info = ""
+                                try:
+                                    vlan_obj = pg_config.defaultPortConfig.vlan
+                                    if hasattr(vlan_obj, "vlanId") and isinstance(vlan_obj.vlanId, int):
+                                        vlan_info = str(vlan_obj.vlanId)
+                                    elif hasattr(vlan_obj, "vlanId"):
+                                        vlan_info = "trunk"
+                                except Exception:  # noqa: BLE001
+                                    pass
+                                networks[pg_moref] = {
+                                    "moref": pg_moref,
+                                    "name": f"{dvs.name} - {pg_config.name}",
+                                    "type": "dvportgroup",
+                                    "vlan_id": vlan_info,
+                                    "port_binding": pg_config.type if pg_config else "",
+                                    "num_ports": pg_config.numPorts if pg_config else 0,
+                                    "dvswitch_name": dvs.name,
+                                    "host_moref": "",
+                                    "host_name": "",
+                                }
+                            except Exception:  # noqa: BLE001
+                                _LOGGER.debug("Error parsing dvPortgroup %s", pg_moref, exc_info=True)
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.debug("Error parsing dvSwitch %s", dvs_moref, exc_info=True)
+            finally:
+                dvs_view.Destroy()
+
             return networks
         finally:
             self._disconnect(conn)
