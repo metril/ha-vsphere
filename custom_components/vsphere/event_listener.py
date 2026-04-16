@@ -151,56 +151,58 @@ class VSphereEventListener:
     def _do_initial_fetch(self) -> None:
         """Fetch full state via poll connection to populate VSphereData."""
         self._initial_fetch_in_progress = True
-        self._client.ensure_poll_connection()
-        initial_data: dict[str, Any] = {}
+        try:
+            self._client.ensure_poll_connection()
+            initial_data: dict[str, Any] = {}
 
-        if self._categories.get(Category.HOSTS):
-            initial_data["hosts"] = self._apply_filter(self._client.get_hosts(), Category.HOSTS)
-        if self._categories.get(Category.VMS):
-            initial_data["vms"] = self._apply_filter(self._client.get_vms(), Category.VMS)
-        if self._categories.get(Category.DATASTORES):
-            initial_data["datastores"] = self._apply_filter(self._client.get_datastores(), Category.DATASTORES)
-        if self._categories.get(Category.LICENSES):
-            initial_data["licenses"] = self._client.get_licenses()
-        if self._categories.get(Category.CLUSTERS):
-            initial_data["clusters"] = self._apply_filter(self._client.get_clusters(), Category.CLUSTERS)
-        if self._categories.get(Category.NETWORK):
-            initial_data["networks"] = self._client.get_networks()
-        if self._categories.get(Category.RESOURCE_POOLS):
-            initial_data["resource_pools"] = self._apply_filter(
-                self._client.get_resource_pools(), Category.RESOURCE_POOLS
-            )
-        if self._categories.get(Category.EVENTS_ALARMS):
-            initial_data["alarms"] = self._client.get_alarms()
-        if self._categories.get(Category.STORAGE_ADVANCED):
-            initial_data["storage_advanced"] = self._client.get_vm_storage_details()
+            if self._categories.get(Category.HOSTS):
+                initial_data["hosts"] = self._apply_filter(self._client.get_hosts(), Category.HOSTS)
+            if self._categories.get(Category.VMS):
+                initial_data["vms"] = self._apply_filter(self._client.get_vms(), Category.VMS)
+            if self._categories.get(Category.DATASTORES):
+                initial_data["datastores"] = self._apply_filter(self._client.get_datastores(), Category.DATASTORES)
+            if self._categories.get(Category.LICENSES):
+                initial_data["licenses"] = self._client.get_licenses()
+            if self._categories.get(Category.CLUSTERS):
+                initial_data["clusters"] = self._apply_filter(self._client.get_clusters(), Category.CLUSTERS)
+            if self._categories.get(Category.NETWORK):
+                initial_data["networks"] = self._client.get_networks()
+            if self._categories.get(Category.RESOURCE_POOLS):
+                initial_data["resource_pools"] = self._apply_filter(
+                    self._client.get_resource_pools(), Category.RESOURCE_POOLS
+                )
+            if self._categories.get(Category.EVENTS_ALARMS):
+                initial_data["alarms"] = self._client.get_alarms()
+            if self._categories.get(Category.STORAGE_ADVANCED):
+                initial_data["storage_advanced"] = self._client.get_vm_storage_details()
 
-        # Compute running VM counts per host via batch PropertyCollector query.
-        # Also populates _vm_power_cache for real-time delta tracking on push.
-        if "hosts" in initial_data:
-            vm_counts: dict[str, int] = {}
-            try:
-                vm_counts, self._vm_power_cache = self._client.count_running_vms_by_host()
-            except Exception:  # noqa: BLE001
-                _LOGGER.warning("Batch VM count failed; counts may only reflect monitored VMs", exc_info=True)
-                self._vm_power_cache = {}
-                if "vms" in initial_data:
-                    for vm_moref, vm in initial_data["vms"].items():
-                        hm = vm.get("host_moref", "")
-                        ps = str(vm.get("power_state", ""))
-                        self._vm_power_cache[vm_moref] = (hm, ps)
-                        if hm and ps == "poweredOn":
-                            vm_counts[hm] = vm_counts.get(hm, 0) + 1
-            for host_moref, host_data in initial_data["hosts"].items():
-                host_data["vm_count"] = vm_counts.get(host_moref, 0)
-            _LOGGER.info(
-                "Running VM counts per host: %s (tracking %d VMs for deltas)",
-                {m: initial_data["hosts"][m]["vm_count"] for m in initial_data["hosts"]},
-                len(self._vm_power_cache),
-            )
+            # Compute running VM counts per host via batch PropertyCollector query.
+            # Also populates _vm_power_cache for real-time delta tracking on push.
+            if "hosts" in initial_data:
+                vm_counts: dict[str, int] = {}
+                try:
+                    vm_counts, self._vm_power_cache = self._client.count_running_vms_by_host()
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning("Batch VM count failed; counts may only reflect monitored VMs", exc_info=True)
+                    self._vm_power_cache = {}
+                    if "vms" in initial_data:
+                        for vm_moref, vm in initial_data["vms"].items():
+                            hm = vm.get("host_moref", "")
+                            ps = str(vm.get("power_state", ""))
+                            self._vm_power_cache[vm_moref] = (hm, ps)
+                            if hm and ps == "poweredOn":
+                                vm_counts[hm] = vm_counts.get(hm, 0) + 1
+                for host_moref, host_data in initial_data["hosts"].items():
+                    host_data["vm_count"] = vm_counts.get(host_moref, 0)
+                _LOGGER.info(
+                    "Running VM counts per host: %s (tracking %d VMs for deltas)",
+                    {m: initial_data["hosts"][m]["vm_count"] for m in initial_data["hosts"]},
+                    len(self._vm_power_cache),
+                )
 
-        self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
-        self._initial_fetch_in_progress = False
+            self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
+        finally:
+            self._initial_fetch_in_progress = False
         _LOGGER.info(
             "Initial fetch: %d hosts, %d VMs, %d datastores, %d licenses, "
             "%d clusters, %d networks, %d resource_pools, %d alarm entities, %d storage objects",

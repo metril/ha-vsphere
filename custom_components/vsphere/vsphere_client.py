@@ -1205,10 +1205,12 @@ class VSphereClient:
         self.ensure_poll_connection()
         vm_obj = self._get_vm_by_moref(vm_moref)
         target_host = self._get_host_by_moref(target_host_moref)
-        vm_name = vm_obj.summary.config.name
-        host_name = target_host.summary.config.name
-
+        vm_name = vm_moref
+        host_name = target_host_moref
         try:
+            vm_name = vm_obj.summary.config.name or vm_moref
+            host_name = target_host.summary.config.name or target_host_moref
+
             # RelocateVM with just the host change = live vMotion
             relocate_spec = vim.vm.RelocateSpec()
             relocate_spec.host = target_host
@@ -1510,8 +1512,8 @@ class VSphereClient:
         # even if those categories are not explicitly enabled.
         watch_categories: dict[str, bool] = dict(categories)
         if categories.get("events_alarms"):
-            watch_categories.setdefault("hosts", True)
-            watch_categories.setdefault("vms", True)
+            watch_categories["hosts"] = True
+            watch_categories["vms"] = True
 
         for category, enabled in watch_categories.items():
             if not enabled:

@@ -299,7 +299,7 @@ async def _handle_list_hosts(call: ServiceCall) -> dict[str, Any]:
     client, _, _, _ = _resolve_device(call.hass, call.data[ATTR_DEVICE_ID])
     try:
         hosts = await call.hass.async_add_executor_job(client.list_hosts)
-    except VSphereOperationError as err:
+    except (VSphereOperationError, VSphereConnectionError) as err:
         raise HomeAssistantError(str(err)) from err
     return {"hosts": hosts}
 
@@ -309,7 +309,7 @@ async def _handle_list_power_policies(call: ServiceCall) -> dict[str, Any]:
     client, _, _, moref = _resolve_device(call.hass, call.data[ATTR_DEVICE_ID])
     try:
         policies = await call.hass.async_add_executor_job(client.list_power_policies, moref)
-    except VSphereOperationError as err:
+    except (VSphereOperationError, VSphereConnectionError) as err:
         raise HomeAssistantError(str(err)) from err
     return {"policies": policies}
 
