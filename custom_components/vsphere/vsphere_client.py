@@ -1560,12 +1560,8 @@ class VSphereClient:
             else:
                 data["mem_usage_gb"] = 0.0
 
-            # Running VM count (only poweredOn VMs)
-            data["vm_count"] = (
-                sum(1 for vm in host.vm if getattr(getattr(vm, "runtime", None), "powerState", None) == "poweredOn")
-                if host.vm
-                else 0
-            )
+            # vm_count is computed post-fetch from VM data (avoids N RPCs per host)
+            data["vm_count"] = 0
 
             # Power policy
             try:

@@ -76,7 +76,21 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 properties["moref"] = moref
                 self._data[category][moref] = properties
+        # Recompute host running VM count when a VM's power state changes
+        if category == "vms" and "power_state" in properties:
+            self._recompute_host_vm_counts()
         self.async_set_updated_data(self._data)
+
+    def _recompute_host_vm_counts(self) -> None:
+        """Recompute running VM counts for all hosts from stored VM data."""
+        hosts = self._data.get("hosts", {})
+        vms = self._data.get("vms", {})
+        if not hosts:
+            return
+        for host_moref, host_data in hosts.items():
+            host_data["vm_count"] = sum(
+                1 for vm in vms.values() if vm.get("host_moref") == host_moref and vm.get("power_state") == "poweredOn"
+            )
 
     @callback
     def async_remove_object(self, category: str, moref: str) -> None:

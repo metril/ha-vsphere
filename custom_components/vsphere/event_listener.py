@@ -167,6 +167,15 @@ class VSphereEventListener:
         if self._categories.get(Category.STORAGE_ADVANCED):
             initial_data["storage_advanced"] = self._client.get_vm_storage_details()
 
+        # Compute running VM counts per host from already-fetched VM data (no extra RPCs)
+        if "hosts" in initial_data and "vms" in initial_data:
+            for host_moref in initial_data["hosts"]:
+                initial_data["hosts"][host_moref]["vm_count"] = sum(
+                    1
+                    for vm in initial_data["vms"].values()
+                    if vm.get("host_moref") == host_moref and vm.get("power_state") == "poweredOn"
+                )
+
         self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
         _LOGGER.info(
             "Initial fetch: %d hosts, %d VMs, %d datastores, %d licenses, "
@@ -352,17 +361,9 @@ class VSphereEventListener:
             val = d.pop("_mem_bytes")
             if val:
                 d["mem_total_gb"] = round(val / (1024**3), 2)
-        if "_vm_list" in d:
-            val = d.pop("_vm_list")
-            # Count running VMs by cross-referencing against stored coordinator VM data.
-            # Cannot access vm.runtime.powerState directly — would trigger live RPCs on push thread.
-            stored_vms = self._vsphere_data._data.get("vms", {})  # noqa: SLF001
-            if val and stored_vms:
-                d["vm_count"] = sum(
-                    1 for vm in val if stored_vms.get(getattr(vm, "_moId", ""), {}).get("power_state") == "poweredOn"
-                )
-            else:
-                d["vm_count"] = 0
+        # Discard _vm_list — vm_count is computed by coordinator._recompute_host_vm_counts
+        # when VM power states change (no RPCs needed on push thread)
+        d.pop("_vm_list", None)
 
     def _derive_vm_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived VM values from raw inputs."""
