@@ -88,11 +88,20 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         if not hosts:
             return
         for host_moref, host_data in hosts.items():
+            old_count = host_data.get("vm_count", 0)
             host_data["vm_count"] = sum(
                 1
                 for vm in vms.values()
                 if vm.get("host_moref") == host_moref and str(vm.get("power_state", "")) == "poweredOn"
             )
+            if host_data["vm_count"] != old_count:
+                _LOGGER.debug(
+                    "Host %s vm_count: %d → %d (from %d stored VMs)",
+                    host_moref,
+                    old_count,
+                    host_data["vm_count"],
+                    len(vms),
+                )
 
     @callback
     def async_remove_object(self, category: str, moref: str) -> None:

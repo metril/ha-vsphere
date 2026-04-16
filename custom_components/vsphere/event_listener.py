@@ -167,14 +167,26 @@ class VSphereEventListener:
         if self._categories.get(Category.STORAGE_ADVANCED):
             initial_data["storage_advanced"] = self._client.get_vm_storage_details()
 
-        # Compute running VM counts per host from already-fetched VM data (no extra RPCs)
-        if "hosts" in initial_data and "vms" in initial_data:
-            for host_moref in initial_data["hosts"]:
-                initial_data["hosts"][host_moref]["vm_count"] = sum(
-                    1
-                    for vm in initial_data["vms"].values()
-                    if vm.get("host_moref") == host_moref and str(vm.get("power_state", "")) == "poweredOn"
-                )
+        # Compute running VM counts per host.
+        # Primary: batch PropertyCollector query (works even when VMs category is off).
+        # Fallback: count from already-fetched VM data.
+        if "hosts" in initial_data:
+            vm_counts: dict[str, int] = {}
+            try:
+                vm_counts = self._client.count_running_vms_by_host()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Batch VM count failed, falling back to fetched VM data", exc_info=True)
+                if "vms" in initial_data:
+                    for vm in initial_data["vms"].values():
+                        hm = vm.get("host_moref")
+                        if hm and str(vm.get("power_state", "")) == "poweredOn":
+                            vm_counts[hm] = vm_counts.get(hm, 0) + 1
+            for host_moref, host_data in initial_data["hosts"].items():
+                host_data["vm_count"] = vm_counts.get(host_moref, 0)
+            _LOGGER.info(
+                "Running VM counts per host: %s",
+                {m: initial_data["hosts"][m]["vm_count"] for m in initial_data["hosts"]},
+            )
 
         self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_set_initial_data, initial_data)
         _LOGGER.info(
@@ -338,8 +350,6 @@ class VSphereEventListener:
 
     def _derive_host_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived host values from raw inputs."""
-        if "state" in d:
-            d["state"] = str(d["state"])
         if "_uptime_raw" in d:
             val = d.pop("_uptime_raw")
             if val is not None:

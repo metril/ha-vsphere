@@ -206,6 +206,59 @@ class VSphereClient:
         finally:
             self._disconnect(conn)
 
+    def count_running_vms_by_host(self) -> dict[str, int]:
+        """Batch-count running (non-template) VMs per host using PropertyCollector.
+
+        Returns a dict mapping host moref → count of poweredOn VMs.
+        Uses a single RetrievePropertiesEx call (efficient, no per-VM RPCs).
+        """
+        conn = self._connect()
+        try:
+            content = conn.RetrieveContent()
+            pc = content.propertyCollector
+            view = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
+            try:
+                traversal = vmodl.query.PropertyCollector.TraversalSpec(
+                    name="view_vms",
+                    type=vim.view.ContainerView,
+                    path="view",
+                    skip=False,
+                )
+                obj_spec = vmodl.query.PropertyCollector.ObjectSpec(obj=view, skip=True, selectSet=[traversal])
+                prop_spec = vmodl.query.PropertyCollector.PropertySpec(
+                    type=vim.VirtualMachine,
+                    pathSet=["runtime.powerState", "runtime.host", "config.template"],
+                    all=False,
+                )
+                filter_spec = vmodl.query.PropertyCollector.FilterSpec(objectSet=[obj_spec], propSet=[prop_spec])
+                options = vmodl.query.PropertyCollector.RetrieveOptions(maxObjects=500)
+                result = pc.RetrievePropertiesEx(specSet=[filter_spec], options=options)
+
+                counts: dict[str, int] = {}
+                while result:
+                    for obj_content in result.objects:
+                        power_state = None
+                        host_moref = None
+                        is_template = False
+                        for prop in obj_content.propSet or []:
+                            if prop.name == "runtime.powerState":
+                                power_state = str(prop.val)
+                            elif prop.name == "runtime.host" and prop.val:
+                                host_moref = prop.val._moId  # noqa: SLF001
+                            elif prop.name == "config.template":
+                                is_template = bool(prop.val)
+                        if host_moref and power_state == "poweredOn" and not is_template:
+                            counts[host_moref] = counts.get(host_moref, 0) + 1
+                    if result.token:
+                        result = pc.ContinueRetrievePropertiesEx(token=result.token)
+                    else:
+                        break
+                return counts
+            finally:
+                view.Destroy()
+        finally:
+            self._disconnect(conn)
+
     def get_vms(self) -> dict[str, dict[str, Any]]:
         """Fetch all VirtualMachine objects and return parsed VM dicts."""
         conn = self._connect()
