@@ -195,9 +195,6 @@ class VSphereEventListener:
                                 vm_counts[hm] = vm_counts.get(hm, 0) + 1
                 for host_moref, host_data in initial_data["hosts"].items():
                     host_data["vm_count"] = vm_counts.get(host_moref, 0)
-                    # A powered-off host cannot run VMs regardless of stale VM states
-                    if str(host_data.get("state", "")) != "poweredOn":
-                        host_data["vm_count"] = 0
                 _LOGGER.info(
                     "Running VM counts per host: %s (tracking %d VMs for deltas)",
                     {m: initial_data["hosts"][m]["vm_count"] for m in initial_data["hosts"]},
