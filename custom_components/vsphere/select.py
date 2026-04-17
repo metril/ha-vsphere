@@ -9,7 +9,15 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, SNAP_SELECT_ALL, HostAction, VmAction
+from .const import (
+    CONF_CATEGORIES,
+    DEFAULT_CATEGORIES,
+    DOMAIN,
+    SNAP_SELECT_ALL,
+    SNAP_SELECT_NONE,
+    HostAction,
+    VmAction,
+)
 from .entity import VSphereEntity
 from .exceptions import VSphereConnectionError, VSphereOperationError
 
@@ -240,15 +248,17 @@ class VmSnapshotSelect(VSphereEntity, SelectEntity):
 
     @property
     def options(self) -> list[str]:
-        """Return snapshot names plus 'All snapshots', or empty when none exist."""
+        """Return a leading placeholder, snapshot names, and 'All snapshots'."""
         obj_data = self._get_data()
         snapshots: list[dict[str, str]] = obj_data.get("snapshots", []) if obj_data else []
         if not snapshots:
             return []
+        # Placeholder first — default selection, safe because pressing remove
+        # with this option raises an error instead of deleting anything.
+        names: list[str] = [SNAP_SELECT_NONE]
         # Disambiguate duplicate snapshot names with a suffix
         raw_names = [s["name"] for s in snapshots]
         seen: dict[str, int] = {}
-        names: list[str] = []
         for n in raw_names:
             seen[n] = seen.get(n, 0) + 1
             if raw_names.count(n) > 1:
@@ -260,15 +270,15 @@ class VmSnapshotSelect(VSphereEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        """Return the currently selected snapshot.
+        """Return the currently selected snapshot, defaulting to the placeholder.
 
-        Does NOT auto-default to avoid silently targeting the wrong snapshot
-        for destructive removal operations after data refreshes.
+        The placeholder is a safe default because the remove button rejects it.
+        Never auto-targets a real snapshot — that would risk silent destructive ops.
         """
         opts = self.options
         if self._selected and self._selected in opts:
             return self._selected
-        return None
+        return SNAP_SELECT_NONE if opts else None
 
     async def async_select_option(self, option: str) -> None:
         """Update the selected snapshot."""

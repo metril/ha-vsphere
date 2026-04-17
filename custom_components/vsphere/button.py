@@ -14,6 +14,7 @@ from .const import (
     DOMAIN,
     SNAP_ALL,
     SNAP_SELECT_ALL,
+    SNAP_SELECT_NONE,
     VmAction,
 )
 from .entity import VSphereEntity
@@ -291,7 +292,7 @@ class VmSnapshotRemoveButton(_VSphereButton):
             if state:
                 selected = state.state
 
-        if not selected or selected in ("unknown", "unavailable", ""):
+        if not selected or selected in ("unknown", "unavailable", "", SNAP_SELECT_NONE):
             raise HomeAssistantError("No snapshot selected. Choose a snapshot from the Snapshot selector first.")
 
         try:
