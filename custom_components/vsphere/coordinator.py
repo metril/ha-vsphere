@@ -76,6 +76,13 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 properties["moref"] = moref
                 self._data[category][moref] = properties
+        # A powered-off host cannot run VMs — reset count regardless of what
+        # vCenter reports for the VMs registered on it.
+        if category == "hosts" and "state" in properties:
+            host_data = self._data.get("hosts", {}).get(moref, {})
+            if str(host_data.get("state", "")) != "poweredOn" and host_data.get("vm_count", 0) > 0:
+                host_data["vm_count"] = 0
+                _LOGGER.debug("Host %s not poweredOn — vm_count reset to 0", moref)
         self.async_set_updated_data(self._data)
 
     @callback
