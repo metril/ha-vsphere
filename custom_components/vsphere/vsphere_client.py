@@ -1387,6 +1387,7 @@ class VSphereClient:
         host_props = [
             "summary.config.name",
             "summary.runtime.powerState",
+            "summary.runtime.connectionState",
             "summary.runtime.inMaintenanceMode",
             "summary.quickStats.uptime",
             "summary.quickStats.overallCpuUsage",
@@ -1589,6 +1590,7 @@ class VSphereClient:
 
             data["name"] = config.name if config else moref
             data["state"] = str(runtime.powerState) if runtime else "unknown"
+            data["connection_state"] = str(runtime.connectionState) if runtime else "unknown"
             data["maintenance_mode"] = bool(runtime.inMaintenanceMode) if runtime else False
             data["version"] = config.product.version if config and config.product else ""
             data["build"] = config.product.build if config and config.product else ""

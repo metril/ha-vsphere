@@ -26,6 +26,7 @@ WAIT_OPTIONS_MAX_WAIT: int = 60
 _HOST_PROP_MAP: dict[str, str] = {
     "summary.config.name": "name",
     "summary.runtime.powerState": "state",
+    "summary.runtime.connectionState": "connection_state",
     "summary.runtime.inMaintenanceMode": "maintenance_mode",
     "summary.quickStats.uptime": "_uptime_raw",
     "summary.quickStats.overallCpuUsage": "_cpu_usage_raw",
@@ -387,6 +388,8 @@ class VSphereEventListener:
 
     def _derive_host_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived host values from raw inputs."""
+        if d.get("connection_state") is not None:
+            d["connection_state"] = str(d["connection_state"])
         if "_uptime_raw" in d:
             val = d.pop("_uptime_raw")
             if val is not None:

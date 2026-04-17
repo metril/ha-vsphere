@@ -42,7 +42,10 @@ HOST_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
         translation_key="powered_on",
         name="Powered On",
         device_class=BinarySensorDeviceClass.POWER,
-        value_fn=lambda d: d.get("state") == "poweredOn",
+        # A host shutting down may have powerState briefly flip before it's
+        # actually off. Treat it as on if either powerState is poweredOn OR
+        # vCenter is still connected to it.
+        value_fn=lambda d: d.get("state") == "poweredOn" or d.get("connection_state") == "connected",
     ),
     VSphereBinarySensorDescription(
         key="maintenance_mode",
