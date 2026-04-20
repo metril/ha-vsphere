@@ -358,6 +358,39 @@ data:
 
 ---
 
+## Excluding from the Recorder
+
+vSphere entities update frequently (push-based PropertyCollector plus optional performance polling), which can grow the Home Assistant recorder database faster than most users want. Home Assistant has no per-integration recorder filter, so exclusion must be configured manually.
+
+Entity IDs are derived from your vSphere object names (e.g. `sensor.esxi01_cpu_usage`, `sensor.web01_memory_used`) — they do **not** share a common `vsphere_*` prefix. Inspect your actual IDs at **Settings → Devices & Services → vSphere Control → Entities**.
+
+### Option A — Exclude every vSphere entity via `configuration.yaml`
+
+Add globs that match your vSphere device names. Example for hosts named `esxi*` and the integration's child sensors:
+
+```yaml
+recorder:
+  exclude:
+    entity_globs:
+      - sensor.esxi*
+      - binary_sensor.esxi*
+      - sensor.*_vm_count
+      - sensor.*_snapshot_count
+      # ...add globs that match your VM/datastore naming
+```
+
+### Option B — Keep history but drop noisy attributes only
+
+If you want to keep state history but stop recording attribute payloads, no integration-side change is required today; HA records state changes regardless of attribute filters. Apply Option A's globs for the specific high-cardinality sensors instead (e.g. performance and storage-advanced sensors).
+
+### Notes
+
+- Restart Home Assistant after editing `configuration.yaml`.
+- Globs are matched against entity IDs, not device names directly. Slugified vSphere names appear in the entity ID.
+- Performance and Storage Advanced categories produce the most history volume — exclude those first if you only want to trim, not eliminate, recording.
+
+---
+
 ## Troubleshooting
 
 ### Integration fails to load / ConfigEntryNotReady
