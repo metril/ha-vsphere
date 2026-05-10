@@ -125,7 +125,7 @@
             },
             "categories": {
                 "title": "Monitoring Categories",
-                "description": "Select which vSphere objects and features to monitor.",
+                "description": "Toggle which vSphere objects to monitor. **Core Monitoring** is enabled by default; **Advanced Monitoring** below adds clusters, network, performance metrics, and more.",
                 "sections": {
                     "core_categories": {
                         "name": "Core Monitoring",
@@ -166,8 +166,8 @@
                 }
             },
             "entity_selection": {
-                "title": "{category} Selection",
-                "description": "Select specific {category} to monitor. Leave the list empty to monitor all {category}, including any added in the future.",
+                "title": "{category} Selection — Step {step_position}",
+                "description": "Select specific **{category}** to monitor, or leave the list empty to monitor all (including any added in the future).\n\n**Next:** {remaining_categories}",
                 "data": {
                     "selected_objects": "Objects to monitor"
                 },
@@ -187,7 +187,7 @@
             },
             "restrictions_menu": {
                 "title": "Operation Restrictions",
-                "description": "Configure which operations to block.",
+                "description": "Choose what to restrict. Submitting any section returns you here — click **Done** when finished.",
                 "menu_options": {
                     "restrictions": "Global restrictions",
                     "vm_select": "VM restrictions",
@@ -195,9 +195,9 @@
                     "restrictions_done": "Done"
                 },
                 "menu_option_descriptions": {
-                    "restrictions": "Block categories of operations across all hosts and VMs",
-                    "vm_select": "Block specific actions on individual VMs",
-                    "host_select": "Block specific actions on individual hosts",
+                    "restrictions": "Block categories of operations across **all** hosts and VMs (currently: {global_restrictions_summary})",
+                    "vm_select": "Block actions on individual VMs ({vm_restrictions_count} configured)",
+                    "host_select": "Block actions on individual hosts ({host_restrictions_count} configured)",
                     "restrictions_done": "Finish configuring restrictions"
                 }
             },
@@ -312,23 +312,23 @@
         "step": {
             "init": {
                 "title": "vSphere Options",
-                "description": "Choose what to configure.",
+                "description": "Configure each section below, then click **Done — save and exit** to persist your changes.\n\nSubmitting a section returns you to this menu — visit each section you want to change.",
                 "menu_options": {
                     "categories": "Monitoring categories",
                     "entity_selection_start": "Entity selection",
                     "restrictions_menu": "Operation restrictions",
-                    "save": "Done"
+                    "save": "Done — save and exit"
                 },
                 "menu_option_descriptions": {
-                    "categories": "Enable or disable monitoring categories and set polling intervals",
-                    "entity_selection_start": "Choose which specific hosts, VMs, and datastores to monitor",
-                    "restrictions_menu": "Block specific actions on individual hosts and VMs",
-                    "save": "Save changes"
+                    "categories": "Enable categories and set polling interval (currently: {categories_summary})",
+                    "entity_selection_start": "Filter which specific objects to monitor (currently: {filter_summary})",
+                    "restrictions_menu": "Block specific actions on hosts or VMs (currently: {restrictions_summary})",
+                    "save": "Persist your changes and close this dialog"
                 }
             },
             "categories": {
                 "title": "Monitoring Categories",
-                "description": "Select which vSphere objects and features to monitor.",
+                "description": "Toggle which vSphere objects to monitor. **Core Monitoring** is enabled by default; **Advanced Monitoring** below adds clusters, network, performance metrics, and more.\n\nClick **Submit** to return to the options menu.",
                 "sections": {
                     "core_categories": {
                         "name": "Core Monitoring",
@@ -369,8 +369,8 @@
                 }
             },
             "entity_selection": {
-                "title": "{category} Selection",
-                "description": "Select specific {category} to monitor. Leave the list empty to monitor all {category}, including any added in the future.",
+                "title": "{category} Selection — Step {step_position}",
+                "description": "Select specific **{category}** to monitor, or leave the list empty to monitor all (including any added in the future).\n\n**Next:** {remaining_categories}",
                 "data": {
                     "selected_objects": "Objects to monitor"
                 },
@@ -380,17 +380,17 @@
             },
             "restrictions_menu": {
                 "title": "Operation Restrictions",
-                "description": "Configure which operations to block.",
+                "description": "Choose what to restrict. Submitting any section returns you here — click **Back to options menu** when finished.",
                 "menu_options": {
                     "restrictions": "Global restrictions",
                     "vm_select": "VM restrictions",
                     "host_select": "Host restrictions",
-                    "init": "Back"
+                    "init": "Back to options menu"
                 },
                 "menu_option_descriptions": {
-                    "restrictions": "Block categories of operations across all hosts and VMs",
-                    "vm_select": "Block specific actions on individual VMs",
-                    "host_select": "Block specific actions on individual hosts",
+                    "restrictions": "Block categories of operations across **all** hosts and VMs (currently: {global_restrictions_summary})",
+                    "vm_select": "Block actions on individual VMs ({vm_restrictions_count} configured)",
+                    "host_select": "Block actions on individual hosts ({host_restrictions_count} configured)",
                     "init": "Return to the main menu"
                 }
             },

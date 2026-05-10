@@ -153,7 +153,7 @@ def _categories_schema(
     return vol.Schema(
         {
             vol.Required("core_categories"): section(core_schema, {"collapsed": False}),
-            vol.Required("advanced_categories"): section(advanced_schema, {"collapsed": True}),
+            vol.Required("advanced_categories"): section(advanced_schema, {"collapsed": False}),
         }
     )
 
@@ -235,11 +235,44 @@ class _RestrictionFlowMixin:
     _inventory: dict[str, dict[str, Any]]
     _entity_filter: dict[str, Any]
     _restrictions: dict[str, Any]
+    _filterable_remaining: list[Category]
+    _filterable_total: int
     _current_vm_moref: str | None
     _current_host_moref: str | None
 
     async def _ensure_inventory(self) -> None:
         """Ensure inventory is loaded. No-op by default; overridden in options flow."""
+
+    def _entity_selection_placeholders(self, category: Category) -> dict[str, str]:
+        """Build description_placeholders for the entity_selection step.
+
+        Reports current step position and the categories yet to come.
+        """
+        # _filterable_remaining has already had the current category popped off
+        position = self._filterable_total - len(self._filterable_remaining)
+        if self._filterable_remaining:
+            upcoming = ", ".join(_CATEGORY_DISPLAY_NAMES.get(c, c.value) for c in self._filterable_remaining)
+        else:
+            upcoming = "none — this is the last step"
+        return {
+            "category": _CATEGORY_DISPLAY_NAMES.get(category, category.value),
+            "step_position": f"{position} of {self._filterable_total}",
+            "remaining_categories": upcoming,
+        }
+
+    def _global_restrictions_summary(self) -> str:
+        """Return a short summary of active global restrictions only."""
+        g = self._restrictions.get("global", {})
+        active = [k for k, v in g.items() if v]
+        return ", ".join(active) if active else "none"
+
+    def _restrictions_menu_placeholders(self) -> dict[str, str]:
+        """Build description_placeholders for the restrictions_menu step."""
+        return {
+            "global_restrictions_summary": self._global_restrictions_summary(),
+            "vm_restrictions_count": str(len(self._restrictions.get("vms", {}))),
+            "host_restrictions_count": str(len(self._restrictions.get("hosts", {}))),
+        }
 
     def _vm_options(self) -> list[SelectOptionDict]:
         """Return sorted VM options from inventory, filtered to monitored VMs."""
@@ -419,6 +452,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
         self._entity_filter: dict[str, Any] = {}
         self._inventory: dict[str, dict[str, Any]] = {}
         self._filterable_remaining: list[Category] = []
+        self._filterable_total: int = 0
         self._current_filter_category: Category | None = None
         self._restrictions: dict[str, Any] = {}
         self._perf_interval: int = DEFAULT_PERF_INTERVAL
@@ -501,6 +535,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
 
         # Build list of filterable categories that are enabled
         self._filterable_remaining = [cat for cat in _FILTERABLE_CATEGORIES if self._categories.get(cat.value, False)]
+        self._filterable_total = len(self._filterable_remaining)
         return await self._next_entity_selection_step()
 
     async def _next_entity_selection_step(self) -> ConfigFlowResult:
@@ -561,7 +596,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="entity_selection",
             data_schema=data_schema,
-            description_placeholders={"category": _CATEGORY_DISPLAY_NAMES.get(category, category.value)},
+            description_placeholders=self._entity_selection_placeholders(category),
         )
 
     # ------------------------------------------------------------------
@@ -593,6 +628,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="restrictions_menu",
             menu_options=["restrictions", "vm_select", "host_select", "restrictions_done"],
+            description_placeholders=self._restrictions_menu_placeholders(),
         )
 
     async def async_step_restrictions_done(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -753,9 +789,49 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         self._inventory: dict[str, dict[str, Any]] = {}
         self._inventory_loaded: bool = False
         self._filterable_remaining: list[Category] = []
+        self._filterable_total: int = 0
         self._current_filter_category: Category | None = None
         self._current_vm_moref: str | None = None
         self._current_host_moref: str | None = None
+
+    # ------------------------------------------------------------------
+    # Summary helpers (for description_placeholders)
+    # ------------------------------------------------------------------
+
+    def _categories_summary(self) -> str:
+        """Return a short summary of enabled monitoring categories."""
+        enabled = sum(1 for v in self._new_categories.values() if v)
+        total = len(self._new_categories) or len(Category)
+        return f"{enabled} of {total} enabled"
+
+    def _filter_summary(self) -> str:
+        """Return a short summary of per-category entity filters."""
+        parts: list[str] = []
+        for cat in _FILTERABLE_CATEGORIES:
+            if not self._new_categories.get(cat.value, False):
+                continue
+            f = self._entity_filter.get(cat.value, {})
+            name = _CATEGORY_DISPLAY_NAMES.get(cat, cat.value)
+            if f.get("mode") == FILTER_MODE_SELECT:
+                parts.append(f"{name}: {len(f.get('morefs', []))} selected")
+            else:
+                parts.append(f"{name}: all")
+        return ", ".join(parts) if parts else "no filterable categories enabled"
+
+    def _restrictions_summary(self) -> str:
+        """Return a short summary of configured operation restrictions."""
+        g = self._restrictions.get("global", {})
+        active_global = [k for k, v in g.items() if v]
+        vms = len(self._restrictions.get("vms", {}))
+        hosts = len(self._restrictions.get("hosts", {}))
+        bits: list[str] = []
+        if active_global:
+            bits.append(f"global: {', '.join(active_global)}")
+        if vms:
+            bits.append(f"{vms} VMs")
+        if hosts:
+            bits.append(f"{hosts} hosts")
+        return "; ".join(bits) if bits else "none"
 
     async def _ensure_inventory(self) -> None:
         """Load inventory once (lazy, shared across all menu sections)."""
@@ -777,9 +853,15 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show the top-level options menu."""
+        await self._ensure_inventory()
         return self.async_show_menu(
             step_id="init",
             menu_options=["categories", "entity_selection_start", "restrictions_menu", "save"],
+            description_placeholders={
+                "categories_summary": self._categories_summary(),
+                "filter_summary": self._filter_summary(),
+                "restrictions_summary": self._restrictions_summary(),
+            },
         )
 
     # ------------------------------------------------------------------
@@ -807,6 +889,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         self._filterable_remaining = [
             cat for cat in _FILTERABLE_CATEGORIES if self._new_categories.get(cat.value, False)
         ]
+        self._filterable_total = len(self._filterable_remaining)
         return await self._next_entity_selection_step()
 
     async def _next_entity_selection_step(self) -> ConfigFlowResult:
@@ -861,7 +944,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
                     ),
                 }
             ),
-            description_placeholders={"category": _CATEGORY_DISPLAY_NAMES.get(category, category.value)},
+            description_placeholders=self._entity_selection_placeholders(category),
         )
 
     # ------------------------------------------------------------------
@@ -874,6 +957,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         return self.async_show_menu(
             step_id="restrictions_menu",
             menu_options=["restrictions", "vm_select", "host_select", "init"],
+            description_placeholders=self._restrictions_menu_placeholders(),
         )
 
     # ------------------------------------------------------------------
