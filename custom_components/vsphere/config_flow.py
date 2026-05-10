@@ -404,7 +404,7 @@ class _RestrictionFlowMixin:
                     ),
                 }
             ),
-            last_step=False,
+            last_step=True,
         )
 
     async def async_step_host_actions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -782,7 +782,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
 
 
 class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
-    """Sequential wizard options flow for vSphere Control."""
+    """Hub-menu options flow for vSphere Control. Each menu option opens a sub-wizard."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize the options flow — load all current options upfront."""
@@ -801,7 +801,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         self._current_host_moref: str | None = None
 
     async def _ensure_inventory(self) -> None:
-        """Load inventory once (lazy, shared across all wizard steps)."""
+        """Load inventory once (lazy, shared across all sub-flows)."""
         if self._inventory_loaded:
             return
         entry_data: dict[str, Any] = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
@@ -815,38 +815,94 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         self._inventory_loaded = True
 
     # ------------------------------------------------------------------
-    # Wizard entry — categories
+    # State summary helpers (rendered into menu_option_descriptions)
+    # ------------------------------------------------------------------
+
+    def _categories_summary(self) -> str:
+        """Return a short summary of enabled monitoring categories."""
+        enabled = sum(1 for v in self._new_categories.values() if v)
+        total = len(self._new_categories) or len(Category)
+        return f"{enabled} of {total} enabled"
+
+    def _filter_summary(self) -> str:
+        """Return a short summary of per-category entity filters."""
+        parts: list[str] = []
+        for cat in _FILTERABLE_CATEGORIES:
+            if not self._new_categories.get(cat.value, False):
+                continue
+            f = self._entity_filter.get(cat.value, {})
+            name = _CATEGORY_DISPLAY_NAMES.get(cat, cat.value)
+            if f.get("mode") == FILTER_MODE_SELECT:
+                parts.append(f"{name}: {len(f.get('morefs', []))} selected")
+            else:
+                parts.append(f"{name}: all")
+        return ", ".join(parts) if parts else "no filterable categories enabled"
+
+    def _restrictions_summary(self) -> str:
+        """Return a short summary of configured operation restrictions."""
+        g = self._restrictions.get("global", {})
+        active_global = [k for k, v in g.items() if v]
+        vms = len(self._restrictions.get("vms", {}))
+        hosts = len(self._restrictions.get("hosts", {}))
+        bits: list[str] = []
+        if active_global:
+            bits.append(f"global: {', '.join(active_global)}")
+        if vms:
+            bits.append(f"{vms} VMs")
+        if hosts:
+            bits.append(f"{hosts} hosts")
+        return "; ".join(bits) if bits else "none"
+
+    # ------------------------------------------------------------------
+    # Hub menu
     # ------------------------------------------------------------------
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Wizard entry point — land directly on the categories step."""
-        return await self.async_step_categories()
+        """Show the top-level options hub."""
+        await self._ensure_inventory()
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["categories", "entity_selection_start", "restrictions", "save"],
+            description_placeholders={
+                "categories_summary": self._categories_summary(),
+                "filter_summary": self._filter_summary(),
+                "restrictions_summary": self._restrictions_summary(),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Sub-flow: Monitoring categories (single-form)
+    # ------------------------------------------------------------------
 
     async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Step 1: monitoring categories."""
+        """Single-form sub-flow for monitoring categories."""
         if user_input is not None:
             self._new_categories, self._new_perf_interval = _flatten_category_sections(user_input)
-            await self._ensure_inventory()
-            self._filterable_remaining = [
-                cat for cat in _FILTERABLE_CATEGORIES if self._new_categories.get(cat.value, False)
-            ]
-            self._filterable_total = len(self._filterable_remaining)
-            return await self._next_entity_selection_step()
+            return await self.async_step_init()
 
         return self.async_show_form(
             step_id="categories",
             data_schema=_categories_schema(self._new_categories, self._new_perf_interval),
-            last_step=False,
+            last_step=True,
         )
 
     # ------------------------------------------------------------------
-    # Step 2: entity selection (looped over enabled filterable categories)
+    # Sub-flow: Entity selection (looped over enabled filterable categories)
     # ------------------------------------------------------------------
 
+    async def async_step_entity_selection_start(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Kick off the entity-selection sub-flow."""
+        await self._ensure_inventory()
+        self._filterable_remaining = [
+            cat for cat in _FILTERABLE_CATEGORIES if self._new_categories.get(cat.value, False)
+        ]
+        self._filterable_total = len(self._filterable_remaining)
+        return await self._next_entity_selection_step()
+
     async def _next_entity_selection_step(self) -> ConfigFlowResult:
-        """Advance to the next filterable category, or move on to restrictions."""
+        """Advance to the next filterable category, or return to the hub."""
         if not self._filterable_remaining:
-            return await self.async_step_setup_restrictions()
+            return await self.async_step_init()
         self._current_filter_category = self._filterable_remaining.pop(0)
         return await self.async_step_entity_selection()
 
@@ -854,7 +910,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         """Handle entity selection for the current filterable category."""
         category = self._current_filter_category
         if category is None:
-            return await self.async_step_setup_restrictions()
+            return await self.async_step_init()
 
         if user_input is not None:
             selected: list[str] = user_input.get("selected_objects", [])
@@ -885,6 +941,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         )
         existing_filter = self._entity_filter.get(category.value, {})
         default_selected = existing_filter.get("morefs", [])
+        is_last = not self._filterable_remaining
 
         return self.async_show_form(
             step_id="entity_selection",
@@ -896,35 +953,23 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
                 }
             ),
             description_placeholders=self._entity_selection_placeholders(category),
-            last_step=False,
+            last_step=is_last,
         )
 
     # ------------------------------------------------------------------
-    # Step 3: restrictions gate
-    # ------------------------------------------------------------------
-
-    async def async_step_setup_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask whether to configure operation restrictions."""
-        if user_input is not None:
-            if user_input.get("configure_restrictions"):
-                return await self.async_step_restrictions()
-            return await self._finish_restrictions()
-
-        configure_default = bool(self._restrictions)
-        return self.async_show_form(
-            step_id="setup_restrictions",
-            data_schema=vol.Schema(
-                {vol.Required("configure_restrictions", default=configure_default): BooleanSelector()}
-            ),
-            last_step=False,
-        )
-
-    # ------------------------------------------------------------------
-    # Finish — commit options and close the wizard
+    # Restrictions sub-flow finish hook — return to hub (NOT save)
     # ------------------------------------------------------------------
 
     async def _finish_restrictions(self) -> ConfigFlowResult:
-        """Hook called by the restrictions sub-wizard when the user is done."""
+        """Restriction sub-wizard reached its end — go back to the hub menu."""
+        return await self.async_step_init()
+
+    # ------------------------------------------------------------------
+    # Hub: Save and exit
+    # ------------------------------------------------------------------
+
+    async def async_step_save(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Commit accumulated in-memory state and close the dialog."""
         return self.async_create_entry(
             data={
                 **dict(self.config_entry.options),

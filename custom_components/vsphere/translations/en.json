@@ -258,6 +258,21 @@
     },
     "options": {
         "step": {
+            "init": {
+                "title": "vSphere Options",
+                "menu_options": {
+                    "categories": "Monitoring categories",
+                    "entity_selection_start": "Entity selection",
+                    "restrictions": "Operation restrictions",
+                    "save": "Save and exit"
+                },
+                "menu_option_descriptions": {
+                    "categories": "{categories_summary}",
+                    "entity_selection_start": "{filter_summary}",
+                    "restrictions": "{restrictions_summary}",
+                    "save": "Persist changes and close"
+                }
+            },
             "categories": {
                 "title": "Monitoring Categories",
                 "sections": {
@@ -304,11 +319,6 @@
                 "description": "Empty = monitor all. Next: {remaining_categories}",
                 "data": { "selected_objects": "Objects to monitor" },
                 "data_description": { "selected_objects": "Leave empty to monitor all (including future additions)" }
-            },
-            "setup_restrictions": {
-                "title": "Restrictions",
-                "description": "Block specific actions to prevent accidental operations?",
-                "data": { "configure_restrictions": "Configure restrictions" }
             },
             "restrictions": {
                 "title": "Global Restrictions",
