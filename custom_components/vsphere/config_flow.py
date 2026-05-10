@@ -153,7 +153,7 @@ def _categories_schema(
     return vol.Schema(
         {
             vol.Required("core_categories"): section(core_schema, {"collapsed": False}),
-            vol.Required("advanced_categories"): section(advanced_schema, {"collapsed": False}),
+            vol.Required("advanced_categories"): section(advanced_schema, {"collapsed": True}),
         }
     )
 
@@ -217,6 +217,9 @@ def _flatten_category_sections(user_input: dict[str, Any]) -> tuple[dict[str, bo
 # ======================================================================
 
 
+_SKIP_SENTINEL = "_skip"
+
+
 class _RestrictionFlowMixin:
     """Shared restriction-flow steps used by both config and options flows.
 
@@ -227,8 +230,7 @@ class _RestrictionFlowMixin:
       - self._current_host_moref: str | None
       - self.hass
       - self.async_show_form()
-      - self.async_show_menu()
-      - async_step_restrictions_menu()  (differs per flow)
+      - _finish_restrictions()  (commits and ends the flow)
     """
 
     # Declared for type checkers — initialized in each concrete __init__
@@ -242,6 +244,10 @@ class _RestrictionFlowMixin:
 
     async def _ensure_inventory(self) -> None:
         """Ensure inventory is loaded. No-op by default; overridden in options flow."""
+
+    async def _finish_restrictions(self) -> ConfigFlowResult:
+        """Hook called when the restrictions sub-wizard is done. Subclass overrides."""
+        raise NotImplementedError
 
     def _entity_selection_placeholders(self, category: Category) -> dict[str, str]:
         """Build description_placeholders for the entity_selection step.
@@ -258,20 +264,6 @@ class _RestrictionFlowMixin:
             "category": _CATEGORY_DISPLAY_NAMES.get(category, category.value),
             "step_position": f"{position} of {self._filterable_total}",
             "remaining_categories": upcoming,
-        }
-
-    def _global_restrictions_summary(self) -> str:
-        """Return a short summary of active global restrictions only."""
-        g = self._restrictions.get("global", {})
-        active = [k for k, v in g.items() if v]
-        return ", ".join(active) if active else "none"
-
-    def _restrictions_menu_placeholders(self) -> dict[str, str]:
-        """Build description_placeholders for the restrictions_menu step."""
-        return {
-            "global_restrictions_summary": self._global_restrictions_summary(),
-            "vm_restrictions_count": str(len(self._restrictions.get("vms", {}))),
-            "host_restrictions_count": str(len(self._restrictions.get("hosts", {}))),
         }
 
     def _vm_options(self) -> list[SelectOptionDict]:
@@ -313,37 +305,46 @@ class _RestrictionFlowMixin:
                 "migrate": user_input.get("block_migrate", False),
                 "host_ops": user_input.get("block_host_ops", False),
             }
-            return await self.async_step_restrictions_menu()
+            return await self.async_step_vm_select()
 
         return self.async_show_form(
             step_id="restrictions",
             data_schema=_restrictions_schema(self._restrictions),
+            last_step=False,
         )
 
     async def async_step_vm_select(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Select a single VM to configure restrictions for."""
+        """Pick a VM to restrict — or skip to advance to host restrictions."""
         await self._ensure_inventory()
         vm_opts = self._vm_options()
         if not vm_opts:
-            return await self.async_step_restrictions_menu()
+            return await self.async_step_host_select()
 
         if user_input is not None:
-            self._current_vm_moref = user_input["vm_to_restrict"]
+            choice = user_input["vm_to_restrict"]
+            if choice == _SKIP_SENTINEL:
+                return await self.async_step_host_select()
+            self._current_vm_moref = choice
             return await self.async_step_vm_actions()
 
+        skip_label = "Skip — continue to host restrictions"
+        options_with_skip = [*vm_opts, SelectOptionDict(value=_SKIP_SENTINEL, label=skip_label)]
         return self.async_show_form(
             step_id="vm_select",
             data_schema=vol.Schema(
                 {
-                    vol.Required("vm_to_restrict"): SelectSelector(
-                        SelectSelectorConfig(options=vm_opts, multiple=False, mode=SelectSelectorMode.DROPDOWN)
+                    vol.Required("vm_to_restrict", default=_SKIP_SENTINEL): SelectSelector(
+                        SelectSelectorConfig(
+                            options=options_with_skip, multiple=False, mode=SelectSelectorMode.DROPDOWN
+                        )
                     ),
                 }
             ),
+            last_step=False,
         )
 
     async def async_step_vm_actions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Select which actions to block on the chosen VM."""
+        """Select which actions to block on the chosen VM, then loop back to vm_select."""
         from .const import VmAction  # noqa: PLC0415
 
         moref = self._current_vm_moref or ""
@@ -356,7 +357,7 @@ class _RestrictionFlowMixin:
             else:
                 self._restrictions.get("vms", {}).pop(moref, None)
             self._current_vm_moref = None
-            return await self.async_step_restrictions_menu()
+            return await self.async_step_vm_select()
 
         current_actions = [k for k, v in self._restrictions.get("vms", {}).get(moref, {}).items() if v and k != "_all"]
         vm_action_options: list[SelectOptionDict] = sorted(
@@ -374,32 +375,40 @@ class _RestrictionFlowMixin:
                 }
             ),
             description_placeholders={"vm_name": name},
+            last_step=False,
         )
 
     async def async_step_host_select(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Select a single host to configure restrictions for."""
+        """Pick a host to restrict — or skip to finish."""
         await self._ensure_inventory()
         host_opts = self._host_options()
         if not host_opts:
-            return await self.async_step_restrictions_menu()
+            return await self._finish_restrictions()
 
         if user_input is not None:
-            self._current_host_moref = user_input["host_to_restrict"]
+            choice = user_input["host_to_restrict"]
+            if choice == _SKIP_SENTINEL:
+                return await self._finish_restrictions()
+            self._current_host_moref = choice
             return await self.async_step_host_actions()
 
+        options_with_skip = [*host_opts, SelectOptionDict(value=_SKIP_SENTINEL, label="Skip — finish")]
         return self.async_show_form(
             step_id="host_select",
             data_schema=vol.Schema(
                 {
-                    vol.Required("host_to_restrict"): SelectSelector(
-                        SelectSelectorConfig(options=host_opts, multiple=False, mode=SelectSelectorMode.DROPDOWN)
+                    vol.Required("host_to_restrict", default=_SKIP_SENTINEL): SelectSelector(
+                        SelectSelectorConfig(
+                            options=options_with_skip, multiple=False, mode=SelectSelectorMode.DROPDOWN
+                        )
                     ),
                 }
             ),
+            last_step=False,
         )
 
     async def async_step_host_actions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Select which actions to block on the chosen host."""
+        """Select which actions to block on the chosen host, then loop back to host_select."""
         from .const import HostAction  # noqa: PLC0415
 
         moref = self._current_host_moref or ""
@@ -412,7 +421,7 @@ class _RestrictionFlowMixin:
             else:
                 self._restrictions.get("hosts", {}).pop(moref, None)
             self._current_host_moref = None
-            return await self.async_step_restrictions_menu()
+            return await self.async_step_host_select()
 
         current_actions = [
             k for k, v in self._restrictions.get("hosts", {}).get(moref, {}).items() if v and k != "_all"
@@ -432,6 +441,7 @@ class _RestrictionFlowMixin:
                 }
             ),
             description_placeholders={"host_name": name},
+            last_step=False,
         )
 
 
@@ -495,6 +505,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=_connection_schema(render_defaults),
             errors=errors,
+            last_step=False,
         )
 
     # ------------------------------------------------------------------
@@ -510,6 +521,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="categories",
             data_schema=_categories_schema(),
+            last_step=False,
         )
 
     # ------------------------------------------------------------------
@@ -597,6 +609,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
             step_id="entity_selection",
             data_schema=data_schema,
             description_placeholders=self._entity_selection_placeholders(category),
+            last_step=False,
         )
 
     # ------------------------------------------------------------------
@@ -607,7 +620,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
         """Ask whether to configure operation restrictions during initial setup."""
         if user_input is not None:
             if user_input.get("configure_restrictions"):
-                return await self.async_step_restrictions_menu()
+                return await self.async_step_restrictions()
             return self._create_entry()
 
         return self.async_show_form(
@@ -617,22 +630,15 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
                     vol.Required("configure_restrictions", default=False): BooleanSelector(),
                 }
             ),
+            last_step=False,
         )
 
     # ------------------------------------------------------------------
-    # Restrictions menu
+    # Finish hook (called by the restrictions sub-wizard in the mixin)
     # ------------------------------------------------------------------
 
-    async def async_step_restrictions_menu(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Show the restrictions sub-menu."""
-        return self.async_show_menu(
-            step_id="restrictions_menu",
-            menu_options=["restrictions", "vm_select", "host_select", "restrictions_done"],
-            description_placeholders=self._restrictions_menu_placeholders(),
-        )
-
-    async def async_step_restrictions_done(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Finish restrictions and create the config entry."""
+    async def _finish_restrictions(self) -> ConfigFlowResult:
+        """Commit the config entry when the restrictions wizard finishes."""
         return self._create_entry()
 
     # ------------------------------------------------------------------
@@ -776,7 +782,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
 
 
 class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
-    """Menu-driven options flow for vSphere Control."""
+    """Sequential wizard options flow for vSphere Control."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize the options flow — load all current options upfront."""
@@ -794,47 +800,8 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         self._current_vm_moref: str | None = None
         self._current_host_moref: str | None = None
 
-    # ------------------------------------------------------------------
-    # Summary helpers (for description_placeholders)
-    # ------------------------------------------------------------------
-
-    def _categories_summary(self) -> str:
-        """Return a short summary of enabled monitoring categories."""
-        enabled = sum(1 for v in self._new_categories.values() if v)
-        total = len(self._new_categories) or len(Category)
-        return f"{enabled} of {total} enabled"
-
-    def _filter_summary(self) -> str:
-        """Return a short summary of per-category entity filters."""
-        parts: list[str] = []
-        for cat in _FILTERABLE_CATEGORIES:
-            if not self._new_categories.get(cat.value, False):
-                continue
-            f = self._entity_filter.get(cat.value, {})
-            name = _CATEGORY_DISPLAY_NAMES.get(cat, cat.value)
-            if f.get("mode") == FILTER_MODE_SELECT:
-                parts.append(f"{name}: {len(f.get('morefs', []))} selected")
-            else:
-                parts.append(f"{name}: all")
-        return ", ".join(parts) if parts else "no filterable categories enabled"
-
-    def _restrictions_summary(self) -> str:
-        """Return a short summary of configured operation restrictions."""
-        g = self._restrictions.get("global", {})
-        active_global = [k for k, v in g.items() if v]
-        vms = len(self._restrictions.get("vms", {}))
-        hosts = len(self._restrictions.get("hosts", {}))
-        bits: list[str] = []
-        if active_global:
-            bits.append(f"global: {', '.join(active_global)}")
-        if vms:
-            bits.append(f"{vms} VMs")
-        if hosts:
-            bits.append(f"{hosts} hosts")
-        return "; ".join(bits) if bits else "none"
-
     async def _ensure_inventory(self) -> None:
-        """Load inventory once (lazy, shared across all menu sections)."""
+        """Load inventory once (lazy, shared across all wizard steps)."""
         if self._inventory_loaded:
             return
         entry_data: dict[str, Any] = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
@@ -848,54 +815,38 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         self._inventory_loaded = True
 
     # ------------------------------------------------------------------
-    # Main menu
+    # Wizard entry — categories
     # ------------------------------------------------------------------
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Show the top-level options menu."""
-        await self._ensure_inventory()
-        return self.async_show_menu(
-            step_id="init",
-            menu_options=["categories", "entity_selection_start", "restrictions_menu", "save"],
-            description_placeholders={
-                "categories_summary": self._categories_summary(),
-                "filter_summary": self._filter_summary(),
-                "restrictions_summary": self._restrictions_summary(),
-            },
-        )
-
-    # ------------------------------------------------------------------
-    # Categories
-    # ------------------------------------------------------------------
+        """Wizard entry point — land directly on the categories step."""
+        return await self.async_step_categories()
 
     async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle monitoring category selection."""
+        """Step 1: monitoring categories."""
         if user_input is not None:
             self._new_categories, self._new_perf_interval = _flatten_category_sections(user_input)
-            return await self.async_step_init()
+            await self._ensure_inventory()
+            self._filterable_remaining = [
+                cat for cat in _FILTERABLE_CATEGORIES if self._new_categories.get(cat.value, False)
+            ]
+            self._filterable_total = len(self._filterable_remaining)
+            return await self._next_entity_selection_step()
 
         return self.async_show_form(
             step_id="categories",
             data_schema=_categories_schema(self._new_categories, self._new_perf_interval),
+            last_step=False,
         )
 
     # ------------------------------------------------------------------
-    # Entity selection
+    # Step 2: entity selection (looped over enabled filterable categories)
     # ------------------------------------------------------------------
 
-    async def async_step_entity_selection_start(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Kick off entity selection — enumerate inventory, then loop categories."""
-        await self._ensure_inventory()
-        self._filterable_remaining = [
-            cat for cat in _FILTERABLE_CATEGORIES if self._new_categories.get(cat.value, False)
-        ]
-        self._filterable_total = len(self._filterable_remaining)
-        return await self._next_entity_selection_step()
-
     async def _next_entity_selection_step(self) -> ConfigFlowResult:
-        """Advance to the next filterable category, or return to menu."""
+        """Advance to the next filterable category, or move on to restrictions."""
         if not self._filterable_remaining:
-            return await self.async_step_init()
+            return await self.async_step_setup_restrictions()
         self._current_filter_category = self._filterable_remaining.pop(0)
         return await self.async_step_entity_selection()
 
@@ -903,7 +854,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         """Handle entity selection for the current filterable category."""
         category = self._current_filter_category
         if category is None:
-            return await self.async_step_init()
+            return await self.async_step_setup_restrictions()
 
         if user_input is not None:
             selected: list[str] = user_input.get("selected_objects", [])
@@ -945,27 +896,35 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
                 }
             ),
             description_placeholders=self._entity_selection_placeholders(category),
+            last_step=False,
         )
 
     # ------------------------------------------------------------------
-    # Restrictions menu
+    # Step 3: restrictions gate
     # ------------------------------------------------------------------
 
-    async def async_step_restrictions_menu(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Show the restrictions sub-menu."""
-        await self._ensure_inventory()
-        return self.async_show_menu(
-            step_id="restrictions_menu",
-            menu_options=["restrictions", "vm_select", "host_select", "init"],
-            description_placeholders=self._restrictions_menu_placeholders(),
+    async def async_step_setup_restrictions(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask whether to configure operation restrictions."""
+        if user_input is not None:
+            if user_input.get("configure_restrictions"):
+                return await self.async_step_restrictions()
+            return await self._finish_restrictions()
+
+        configure_default = bool(self._restrictions)
+        return self.async_show_form(
+            step_id="setup_restrictions",
+            data_schema=vol.Schema(
+                {vol.Required("configure_restrictions", default=configure_default): BooleanSelector()}
+            ),
+            last_step=False,
         )
 
     # ------------------------------------------------------------------
-    # Save
+    # Finish — commit options and close the wizard
     # ------------------------------------------------------------------
 
-    async def async_step_save(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Save all options and finish."""
+    async def _finish_restrictions(self) -> ConfigFlowResult:
+        """Hook called by the restrictions sub-wizard when the user is done."""
         return self.async_create_entry(
             data={
                 **dict(self.config_entry.options),

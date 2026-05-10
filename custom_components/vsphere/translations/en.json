@@ -125,7 +125,6 @@
             },
             "categories": {
                 "title": "Monitoring Categories",
-                "description": "Toggle which vSphere objects to monitor. **Core Monitoring** is enabled by default; **Advanced Monitoring** below adds clusters, network, performance metrics, and more.",
                 "sections": {
                     "core_categories": {
                         "name": "Core Monitoring",
@@ -166,44 +165,19 @@
                 }
             },
             "entity_selection": {
-                "title": "{category} Selection — Step {step_position}",
-                "description": "Select specific **{category}** to monitor, or leave the list empty to monitor all (including any added in the future).\n\n**Next:** {remaining_categories}",
-                "data": {
-                    "selected_objects": "Objects to monitor"
-                },
-                "data_description": {
-                    "selected_objects": "Leave empty to monitor all (including future additions)"
-                }
+                "title": "{category} — {step_position}",
+                "description": "Empty = monitor all. Next: {remaining_categories}",
+                "data": { "selected_objects": "Objects to monitor" },
+                "data_description": { "selected_objects": "Leave empty to monitor all (including future additions)" }
             },
             "setup_restrictions": {
-                "title": "Operation Restrictions",
-                "description": "Would you like to configure operation restrictions? You can block specific actions on hosts or VMs to prevent accidental operations.",
-                "data": {
-                    "configure_restrictions": "Configure operation restrictions now"
-                },
-                "data_description": {
-                    "configure_restrictions": "You can always configure restrictions later in the integration options"
-                }
-            },
-            "restrictions_menu": {
-                "title": "Operation Restrictions",
-                "description": "Choose what to restrict. Submitting any section returns you here — click **Done** when finished.",
-                "menu_options": {
-                    "restrictions": "Global restrictions",
-                    "vm_select": "VM restrictions",
-                    "host_select": "Host restrictions",
-                    "restrictions_done": "Done"
-                },
-                "menu_option_descriptions": {
-                    "restrictions": "Block categories of operations across **all** hosts and VMs (currently: {global_restrictions_summary})",
-                    "vm_select": "Block actions on individual VMs ({vm_restrictions_count} configured)",
-                    "host_select": "Block actions on individual hosts ({host_restrictions_count} configured)",
-                    "restrictions_done": "Finish configuring restrictions"
-                }
+                "title": "Restrictions",
+                "description": "Block specific actions to prevent accidental operations?",
+                "data": { "configure_restrictions": "Configure restrictions" }
             },
             "restrictions": {
-                "title": "Global Operation Restrictions",
-                "description": "Block categories of operations across all hosts and VMs.",
+                "title": "Global Restrictions",
+                "description": "Block operation categories across all objects.",
                 "data": {
                     "block_destructive": "Block destructive operations",
                     "block_snapshots": "Block all snapshot operations",
@@ -218,55 +192,29 @@
                 }
             },
             "vm_select": {
-                "title": "Select VM",
-                "description": "Choose a virtual machine to configure restrictions for.",
-                "data": {
-                    "vm_to_restrict": "Virtual machine"
-                },
-                "data_description": {
-                    "vm_to_restrict": "Select a VM to add or edit restrictions on"
-                }
+                "title": "Per-VM Restrictions",
+                "description": "Pick a VM to restrict, or **Skip** to continue.",
+                "data": { "vm_to_restrict": "Virtual machine" }
             },
             "vm_actions": {
                 "title": "Restrictions for {vm_name}",
-                "description": "Select which actions to block on this VM. Deselect all to remove restrictions.",
-                "data": {
-                    "vm_blocked_actions": "Actions to block"
-                },
-                "data_description": {
-                    "vm_blocked_actions": "Selected actions will be blocked on this VM"
-                }
+                "description": "Select actions to block on this VM.",
+                "data": { "vm_blocked_actions": "Actions to block" }
             },
             "host_select": {
-                "title": "Select Host",
-                "description": "Choose an ESXi host to configure restrictions for.",
-                "data": {
-                    "host_to_restrict": "ESXi host"
-                },
-                "data_description": {
-                    "host_to_restrict": "Select a host to add or edit restrictions on"
-                }
+                "title": "Per-Host Restrictions",
+                "description": "Pick a host to restrict, or **Skip** to finish.",
+                "data": { "host_to_restrict": "ESXi host" }
             },
             "host_actions": {
                 "title": "Restrictions for {host_name}",
-                "description": "Select which actions to block on this host. Deselect all to remove restrictions.",
-                "data": {
-                    "host_blocked_actions": "Actions to block"
-                },
-                "data_description": {
-                    "host_blocked_actions": "Selected actions will be blocked on this host"
-                }
-            },
-            "restrictions_done": {
-                "title": "Restrictions Complete"
+                "description": "Select actions to block on this host.",
+                "data": { "host_blocked_actions": "Actions to block" }
             },
             "reauth_confirm": {
                 "title": "Re-authenticate",
                 "description": "Please enter your updated credentials.",
-                "data": {
-                    "username": "Username",
-                    "password": "Password"
-                }
+                "data": { "username": "Username", "password": "Password" }
             },
             "reconfigure": {
                 "title": "Reconfigure Connection",
@@ -310,25 +258,8 @@
     },
     "options": {
         "step": {
-            "init": {
-                "title": "vSphere Options",
-                "description": "Configure each section below, then click **Done — save and exit** to persist your changes.\n\nSubmitting a section returns you to this menu — visit each section you want to change.",
-                "menu_options": {
-                    "categories": "Monitoring categories",
-                    "entity_selection_start": "Entity selection",
-                    "restrictions_menu": "Operation restrictions",
-                    "save": "Done — save and exit"
-                },
-                "menu_option_descriptions": {
-                    "categories": "Enable categories and set polling interval (currently: {categories_summary})",
-                    "entity_selection_start": "Filter which specific objects to monitor (currently: {filter_summary})",
-                    "restrictions_menu": "Block specific actions on hosts or VMs (currently: {restrictions_summary})",
-                    "save": "Persist your changes and close this dialog"
-                }
-            },
             "categories": {
                 "title": "Monitoring Categories",
-                "description": "Toggle which vSphere objects to monitor. **Core Monitoring** is enabled by default; **Advanced Monitoring** below adds clusters, network, performance metrics, and more.\n\nClick **Submit** to return to the options menu.",
                 "sections": {
                     "core_categories": {
                         "name": "Core Monitoring",
@@ -369,34 +300,19 @@
                 }
             },
             "entity_selection": {
-                "title": "{category} Selection — Step {step_position}",
-                "description": "Select specific **{category}** to monitor, or leave the list empty to monitor all (including any added in the future).\n\n**Next:** {remaining_categories}",
-                "data": {
-                    "selected_objects": "Objects to monitor"
-                },
-                "data_description": {
-                    "selected_objects": "Leave empty to monitor all (including future additions)"
-                }
+                "title": "{category} — {step_position}",
+                "description": "Empty = monitor all. Next: {remaining_categories}",
+                "data": { "selected_objects": "Objects to monitor" },
+                "data_description": { "selected_objects": "Leave empty to monitor all (including future additions)" }
             },
-            "restrictions_menu": {
-                "title": "Operation Restrictions",
-                "description": "Choose what to restrict. Submitting any section returns you here — click **Back to options menu** when finished.",
-                "menu_options": {
-                    "restrictions": "Global restrictions",
-                    "vm_select": "VM restrictions",
-                    "host_select": "Host restrictions",
-                    "init": "Back to options menu"
-                },
-                "menu_option_descriptions": {
-                    "restrictions": "Block categories of operations across **all** hosts and VMs (currently: {global_restrictions_summary})",
-                    "vm_select": "Block actions on individual VMs ({vm_restrictions_count} configured)",
-                    "host_select": "Block actions on individual hosts ({host_restrictions_count} configured)",
-                    "init": "Return to the main menu"
-                }
+            "setup_restrictions": {
+                "title": "Restrictions",
+                "description": "Block specific actions to prevent accidental operations?",
+                "data": { "configure_restrictions": "Configure restrictions" }
             },
             "restrictions": {
-                "title": "Global Operation Restrictions",
-                "description": "Block categories of operations across all hosts and VMs.",
+                "title": "Global Restrictions",
+                "description": "Block operation categories across all objects.",
                 "data": {
                     "block_destructive": "Block destructive operations",
                     "block_snapshots": "Block all snapshot operations",
@@ -411,47 +327,24 @@
                 }
             },
             "vm_select": {
-                "title": "Select VM",
-                "description": "Choose a virtual machine to configure restrictions for.",
-                "data": {
-                    "vm_to_restrict": "Virtual machine"
-                },
-                "data_description": {
-                    "vm_to_restrict": "Select a VM to add or edit restrictions on"
-                }
+                "title": "Per-VM Restrictions",
+                "description": "Pick a VM to restrict, or **Skip** to continue.",
+                "data": { "vm_to_restrict": "Virtual machine" }
             },
             "vm_actions": {
                 "title": "Restrictions for {vm_name}",
-                "description": "Select which actions to block on this VM. Deselect all to remove restrictions.",
-                "data": {
-                    "vm_blocked_actions": "Actions to block"
-                },
-                "data_description": {
-                    "vm_blocked_actions": "Selected actions will be blocked on this VM"
-                }
+                "description": "Select actions to block on this VM.",
+                "data": { "vm_blocked_actions": "Actions to block" }
             },
             "host_select": {
-                "title": "Select Host",
-                "description": "Choose an ESXi host to configure restrictions for.",
-                "data": {
-                    "host_to_restrict": "ESXi host"
-                },
-                "data_description": {
-                    "host_to_restrict": "Select a host to add or edit restrictions on"
-                }
+                "title": "Per-Host Restrictions",
+                "description": "Pick a host to restrict, or **Skip** to finish.",
+                "data": { "host_to_restrict": "ESXi host" }
             },
             "host_actions": {
                 "title": "Restrictions for {host_name}",
-                "description": "Select which actions to block on this host. Deselect all to remove restrictions.",
-                "data": {
-                    "host_blocked_actions": "Actions to block"
-                },
-                "data_description": {
-                    "host_blocked_actions": "Selected actions will be blocked on this host"
-                }
-            },
-            "save": {
-                "title": "Options Saved"
+                "description": "Select actions to block on this host.",
+                "data": { "host_blocked_actions": "Actions to block" }
             }
         }
     }
