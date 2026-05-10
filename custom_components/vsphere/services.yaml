@@ -1,6 +1,4 @@
 vm_power:
-  name: VM Power Control
-  description: Control the power state of a virtual machine.
   fields:
     device_id:
       required: true
@@ -20,8 +18,6 @@ vm_power:
             - suspend
 
 host_power:
-  name: Host Power Control
-  description: Shutdown or reboot an ESXi host.
   fields:
     device_id:
       required: true
@@ -42,8 +38,6 @@ host_power:
         boolean:
 
 host_power_policy:
-  name: Host Power Policy
-  description: Set the power management policy for an ESXi host.
   fields:
     device_id:
       required: true
@@ -56,8 +50,6 @@ host_power_policy:
         text:
 
 host_maintenance_mode:
-  name: Host Maintenance Mode
-  description: Enable or disable maintenance mode on an ESXi host.
   fields:
     device_id:
       required: true
@@ -70,8 +62,6 @@ host_maintenance_mode:
         boolean:
 
 create_snapshot:
-  name: Create VM Snapshot
-  description: Create a snapshot of a virtual machine.
   fields:
     device_id:
       required: true
@@ -98,8 +88,6 @@ create_snapshot:
         boolean:
 
 remove_snapshot:
-  name: Remove VM Snapshot
-  description: Remove one or all snapshots from a virtual machine.
   fields:
     device_id:
       required: true
@@ -116,8 +104,6 @@ remove_snapshot:
             - last
 
 list_hosts:
-  name: List Hosts
-  description: Return a list of all ESXi hosts managed by this vSphere connection.
   response_supported: true
   fields:
     device_id:
@@ -127,8 +113,6 @@ list_hosts:
           integration: vsphere
 
 list_power_policies:
-  name: List Power Policies
-  description: Return the available power management policies for an ESXi host.
   response_supported: true
   fields:
     device_id:
@@ -138,38 +122,26 @@ list_power_policies:
           integration: vsphere
 
 vm_migrate:
-  name: VM Migration (vMotion)
-  description: Live-migrate a virtual machine to a different host.
   fields:
     device_id:
-      name: VM
-      description: The virtual machine to migrate.
       required: true
       selector:
         device:
           integration: vsphere
     target_host:
-      name: Target Host
-      description: The destination ESXi host device.
       required: true
       selector:
         device:
           integration: vsphere
 
 remove_snapshots:
-  name: Remove Snapshots
-  description: Remove one or more snapshots from a virtual machine by name. Pass "all" to remove all snapshots.
   fields:
     device_id:
-      name: VM
-      description: The virtual machine to remove snapshots from.
       required: true
       selector:
         device:
           integration: vsphere
     snapshots:
-      name: Snapshots
-      description: List of snapshot names to remove. Use "all" to remove all snapshots.
       required: true
       selector:
         object:
