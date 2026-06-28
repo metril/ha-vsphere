@@ -1,4 +1,12 @@
-# vSphere Control — Home Assistant Integration
+<p align="center">
+  <img src="custom_components/vsphere/brand/logo.png" alt="vSphere Control" width="380">
+</p>
+
+<h1 align="center">vSphere Control — Home Assistant Integration</h1>
+
+<p align="center">
+  <img src="custom_components/vsphere/brand/icon.png" alt="vSphere Control icon" width="96">
+</p>
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
 [![GitHub Release](https://img.shields.io/github/v/release/metril/ha-vsphere)](https://github.com/metril/ha-vsphere/releases)
