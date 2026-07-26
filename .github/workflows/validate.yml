@@ -23,3 +23,12 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+          # These three gate inclusion in the HACS *default store*, and each is a
+          # repository-level decision rather than a code defect:
+          #   license     — permanently fails: the project is All Rights Reserved,
+          #                 which GitHub cannot resolve to an SPDX identifier.
+          #   topics      — set via repository settings, not this repo's contents.
+          #   description — likewise the GitHub "About" field.
+          # Everything that validates the integration itself (structure, manifest,
+          # brands, hacs.json) still runs and still blocks.
+          ignore: license topics description
