@@ -1,6 +1,6 @@
 [project]
 name = "ha-vsphere"
-version = "3.8.0"
+version = "3.8.1"
 description = "Home Assistant integration for VMware vSphere monitoring and control"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }

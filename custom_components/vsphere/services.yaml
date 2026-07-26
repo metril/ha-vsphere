@@ -9,6 +9,7 @@ vm_power:
       required: true
       selector:
         select:
+          translation_key: vm_power_action
           options:
             - power_on
             - power_off
@@ -28,6 +29,7 @@ host_power:
       required: true
       selector:
         select:
+          translation_key: host_power_action
           options:
             - shutdown
             - reboot
@@ -98,13 +100,13 @@ remove_snapshot:
       required: true
       selector:
         select:
+          translation_key: snapshot_which
           options:
             - all
             - first
             - last
 
 list_hosts:
-  response_supported: true
   fields:
     device_id:
       required: true
@@ -113,7 +115,6 @@ list_hosts:
           integration: vsphere
 
 list_power_policies:
-  response_supported: true
   fields:
     device_id:
       required: true

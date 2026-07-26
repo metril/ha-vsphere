@@ -1,7 +1,7 @@
 # ha-vsphere
 
 Home Assistant custom integration for VMware vSphere monitoring and control.
-**Version:** 3.8.0 | **Domain:** `vsphere` | **IoT Class:** `local_push`
+**Version:** 3.8.1 | **Domain:** `vsphere` | **IoT Class:** `local_push`
 
 ## Project Structure
 

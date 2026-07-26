@@ -1,95 +1,257 @@
 {
     "entity": {
         "sensor": {
-            "cpu_total_ghz": { "name": "CPU Total" },
-            "cpu_usage_ghz": { "name": "CPU Usage" },
-            "mem_total_gb": { "name": "Memory Total" },
-            "mem_usage_gb": { "name": "Memory Usage" },
-            "uptime_hours": { "name": "Uptime" },
-            "host_vm_count": { "name": "Running VMs" },
-            "version": { "name": "Version" },
-            "build": { "name": "Build" },
-            "cpu_count": { "name": "CPU Count" },
-            "cpu_use_pct": { "name": "CPU Usage" },
-            "memory_allocated_mb": { "name": "Memory Allocated" },
-            "memory_used_mb": { "name": "Memory Used" },
-            "memory_active_mb": { "name": "Memory Active" },
-            "used_space_gb": { "name": "Used Space" },
-            "snapshots": { "name": "Snapshots" },
-            "guest_os": { "name": "Guest OS" },
-            "guest_ip": { "name": "Guest IP" },
-            "status": { "name": "Status" },
-            "host_name": { "name": "Host" },
-            "free_space_gb": { "name": "Free Space" },
-            "total_space_gb": { "name": "Total Space" },
-            "type": { "name": "Type" },
-            "connected_hosts": { "name": "Connected Hosts" },
-            "virtual_machines": { "name": "Virtual Machines" },
-            "license_status": { "name": "Status" },
-            "expiration_days": { "name": "Expiration Days" },
-            "product": { "name": "Product" },
-            "drs_automation_level": { "name": "DRS Automation Level" },
-            "total_hosts": { "name": "Total Hosts" },
-            "effective_hosts": { "name": "Effective Hosts" },
-            "total_cpu_mhz": { "name": "Total CPU" },
-            "total_memory_mb": { "name": "Total Memory" },
-            "cluster_vm_count": { "name": "Cluster VMs" },
-            "num_ports": { "name": "Port Count" },
-            "mtu": { "name": "MTU" },
-            "speed_mbps": { "name": "Link Speed" },
-            "vlan_id": { "name": "VLAN ID" },
-            "max_ports": { "name": "Max Ports" },
-            "dvs_num_hosts": { "name": "Connected Hosts" },
-            "dvs_version": { "name": "Version" },
-            "port_binding": { "name": "Port Binding" },
-            "cpu_reservation_mhz": { "name": "CPU Reservation" },
-            "cpu_limit_mhz": { "name": "CPU Limit" },
-            "memory_reservation_mb": { "name": "Memory Reservation" },
-            "memory_limit_mb": { "name": "Memory Limit" },
-            "pool_vm_count": { "name": "Pool VMs" },
-            "perf_cpu_usage_pct": { "name": "CPU Usage (Realtime)" },
-            "perf_mem_active_mb": { "name": "Memory Active (Realtime)" },
-            "perf_net_received_mbps": { "name": "Network Received (Realtime)" },
-            "perf_net_transmitted_mbps": { "name": "Network Transmitted (Realtime)" },
-            "perf_disk_read_mbps": { "name": "Disk Read (Realtime)" },
-            "perf_disk_write_mbps": { "name": "Disk Write (Realtime)" },
-            "perf_read_latency_ms": { "name": "Read Latency (Realtime)" },
-            "perf_write_latency_ms": { "name": "Write Latency (Realtime)" },
-            "perf_read_iops": { "name": "Read IOPS (Realtime)" },
-            "perf_write_iops": { "name": "Write IOPS (Realtime)" },
-            "capacity_gb": { "name": "Capacity" },
-            "thin_provisioned": { "name": "Thin Provisioned" },
-            "datastore": { "name": "Datastore" },
-            "committed_gb": { "name": "Committed" },
-            "uncommitted_gb": { "name": "Uncommitted" },
-            "unshared_gb": { "name": "Unshared" },
-            "active_alarm_count": { "name": "Active Alarms" }
+            "cpu_total_ghz": {
+                "name": "CPU Total"
+            },
+            "cpu_usage_ghz": {
+                "name": "CPU Usage"
+            },
+            "mem_total_gb": {
+                "name": "Memory Total"
+            },
+            "mem_usage_gb": {
+                "name": "Memory Usage"
+            },
+            "uptime_hours": {
+                "name": "Uptime"
+            },
+            "host_vm_count": {
+                "name": "Running VMs"
+            },
+            "version": {
+                "name": "Version"
+            },
+            "build": {
+                "name": "Build"
+            },
+            "cpu_count": {
+                "name": "CPU Count"
+            },
+            "cpu_use_pct": {
+                "name": "CPU Usage"
+            },
+            "memory_allocated_mb": {
+                "name": "Memory Allocated"
+            },
+            "memory_used_mb": {
+                "name": "Memory Used"
+            },
+            "memory_active_mb": {
+                "name": "Memory Active"
+            },
+            "used_space_gb": {
+                "name": "Used Space"
+            },
+            "snapshots": {
+                "name": "Snapshots"
+            },
+            "guest_os": {
+                "name": "Guest OS"
+            },
+            "guest_ip": {
+                "name": "Guest IP"
+            },
+            "status": {
+                "name": "Status"
+            },
+            "host_name": {
+                "name": "Host"
+            },
+            "free_space_gb": {
+                "name": "Free Space"
+            },
+            "total_space_gb": {
+                "name": "Total Space"
+            },
+            "type": {
+                "name": "Type"
+            },
+            "connected_hosts": {
+                "name": "Connected Hosts"
+            },
+            "virtual_machines": {
+                "name": "Virtual Machines"
+            },
+            "license_status": {
+                "name": "Status"
+            },
+            "expiration_days": {
+                "name": "Expiration Days"
+            },
+            "product": {
+                "name": "Product"
+            },
+            "drs_automation_level": {
+                "name": "DRS Automation Level"
+            },
+            "total_hosts": {
+                "name": "Total Hosts"
+            },
+            "effective_hosts": {
+                "name": "Effective Hosts"
+            },
+            "total_cpu_mhz": {
+                "name": "Total CPU"
+            },
+            "total_memory_mb": {
+                "name": "Total Memory"
+            },
+            "cluster_vm_count": {
+                "name": "Cluster VMs"
+            },
+            "num_ports": {
+                "name": "Port Count"
+            },
+            "mtu": {
+                "name": "MTU"
+            },
+            "speed_mbps": {
+                "name": "Link Speed"
+            },
+            "vlan_id": {
+                "name": "VLAN ID"
+            },
+            "max_ports": {
+                "name": "Max Ports"
+            },
+            "dvs_num_hosts": {
+                "name": "Connected Hosts"
+            },
+            "dvs_version": {
+                "name": "Version"
+            },
+            "port_binding": {
+                "name": "Port Binding"
+            },
+            "cpu_reservation_mhz": {
+                "name": "CPU Reservation"
+            },
+            "cpu_limit_mhz": {
+                "name": "CPU Limit"
+            },
+            "memory_reservation_mb": {
+                "name": "Memory Reservation"
+            },
+            "memory_limit_mb": {
+                "name": "Memory Limit"
+            },
+            "pool_vm_count": {
+                "name": "Pool VMs"
+            },
+            "perf_cpu_usage_pct": {
+                "name": "CPU Usage (Realtime)"
+            },
+            "perf_mem_active_mb": {
+                "name": "Memory Active (Realtime)"
+            },
+            "perf_net_received_mbps": {
+                "name": "Network Received (Realtime)"
+            },
+            "perf_net_transmitted_mbps": {
+                "name": "Network Transmitted (Realtime)"
+            },
+            "perf_disk_read_mbps": {
+                "name": "Disk Read (Realtime)"
+            },
+            "perf_disk_write_mbps": {
+                "name": "Disk Write (Realtime)"
+            },
+            "perf_read_latency_ms": {
+                "name": "Read Latency (Realtime)"
+            },
+            "perf_write_latency_ms": {
+                "name": "Write Latency (Realtime)"
+            },
+            "perf_read_iops": {
+                "name": "Read IOPS (Realtime)"
+            },
+            "perf_write_iops": {
+                "name": "Write IOPS (Realtime)"
+            },
+            "capacity_gb": {
+                "name": "Capacity"
+            },
+            "thin_provisioned": {
+                "name": "Thin Provisioned"
+            },
+            "datastore": {
+                "name": "Datastore"
+            },
+            "committed_gb": {
+                "name": "Committed"
+            },
+            "uncommitted_gb": {
+                "name": "Uncommitted"
+            },
+            "unshared_gb": {
+                "name": "Unshared"
+            },
+            "active_alarm_count": {
+                "name": "Active Alarms"
+            }
         },
         "binary_sensor": {
-            "powered_on": { "name": "Powered On" },
-            "maintenance_mode": { "name": "Maintenance Mode" },
-            "tools_running": { "name": "VMware Tools Running" },
-            "drs_enabled": { "name": "DRS Enabled" },
-            "ha_enabled": { "name": "HA Enabled" },
-            "ha_admission_control": { "name": "HA Admission Control" },
-            "link_up": { "name": "Link Up" },
-            "nioc_enabled": { "name": "NIOC Enabled" },
-            "alarm_active": { "name": "Alarm" }
+            "powered_on": {
+                "name": "Powered On"
+            },
+            "maintenance_mode": {
+                "name": "Maintenance Mode"
+            },
+            "tools_running": {
+                "name": "VMware Tools Running"
+            },
+            "drs_enabled": {
+                "name": "DRS Enabled"
+            },
+            "ha_enabled": {
+                "name": "HA Enabled"
+            },
+            "ha_admission_control": {
+                "name": "HA Admission Control"
+            },
+            "link_up": {
+                "name": "Link Up"
+            },
+            "nioc_enabled": {
+                "name": "NIOC Enabled"
+            },
+            "alarm_active": {
+                "name": "Alarm"
+            }
         },
         "switch": {
-            "maintenance_mode": { "name": "Maintenance Mode" }
+            "maintenance_mode": {
+                "name": "Maintenance Mode"
+            }
         },
         "button": {
-            "vm_power_execute": { "name": "Power (Execute)" },
-            "host_power_execute": { "name": "Power (Execute)" },
-            "vm_snapshot_create": { "name": "Create Snapshot" },
-            "vm_snapshot_remove": { "name": "Remove Snapshot" }
+            "vm_power_execute": {
+                "name": "Power (Execute)"
+            },
+            "host_power_execute": {
+                "name": "Power (Execute)"
+            },
+            "vm_snapshot_create": {
+                "name": "Create Snapshot"
+            },
+            "vm_snapshot_remove": {
+                "name": "Remove Snapshot"
+            }
         },
         "select": {
-            "vm_power_operation": { "name": "Power (Operation)" },
-            "host_power_operation": { "name": "Power (Operation)" },
-            "power_policy": { "name": "Power Policy" },
-            "snapshot": { "name": "Snapshot" }
+            "vm_power_operation": {
+                "name": "Power (Operation)"
+            },
+            "host_power_operation": {
+                "name": "Power (Operation)"
+            },
+            "power_policy": {
+                "name": "Power Policy"
+            },
+            "snapshot": {
+                "name": "Snapshot"
+            }
         }
     },
     "config": {
@@ -169,13 +331,19 @@
             "entity_selection": {
                 "title": "{category} — {step_position}",
                 "description": "Empty = monitor all. Next: {remaining_categories}",
-                "data": { "selected_objects": "Objects to monitor" },
-                "data_description": { "selected_objects": "Leave empty to monitor all (including future additions)" }
+                "data": {
+                    "selected_objects": "Objects to monitor"
+                },
+                "data_description": {
+                    "selected_objects": "Leave empty to monitor all (including future additions)"
+                }
             },
             "setup_restrictions": {
                 "title": "Restrictions",
                 "description": "Block specific actions to prevent accidental operations?",
-                "data": { "configure_restrictions": "Configure restrictions" }
+                "data": {
+                    "configure_restrictions": "Configure restrictions"
+                }
             },
             "restrictions": {
                 "title": "Global Restrictions",
@@ -196,27 +364,38 @@
             "vm_select": {
                 "title": "Per-VM Restrictions",
                 "description": "Pick a VM to restrict, or **Skip** to continue.",
-                "data": { "vm_to_restrict": "Virtual machine" }
+                "data": {
+                    "vm_to_restrict": "Virtual machine"
+                }
             },
             "vm_actions": {
                 "title": "Restrictions for {vm_name}",
                 "description": "Select actions to block on this VM.",
-                "data": { "vm_blocked_actions": "Actions to block" }
+                "data": {
+                    "vm_blocked_actions": "Actions to block"
+                }
             },
             "host_select": {
                 "title": "Per-Host Restrictions",
                 "description": "Pick a host to restrict, or **Skip** to finish.",
-                "data": { "host_to_restrict": "ESXi host" }
+                "data": {
+                    "host_to_restrict": "ESXi host"
+                }
             },
             "host_actions": {
                 "title": "Restrictions for {host_name}",
                 "description": "Select actions to block on this host.",
-                "data": { "host_blocked_actions": "Actions to block" }
+                "data": {
+                    "host_blocked_actions": "Actions to block"
+                }
             },
             "reauth_confirm": {
                 "title": "Re-authenticate",
                 "description": "Please enter your updated credentials.",
-                "data": { "username": "Username", "password": "Password" }
+                "data": {
+                    "username": "Username",
+                    "password": "Password"
+                }
             },
             "reconfigure": {
                 "title": "Reconfigure Connection",
@@ -321,8 +500,12 @@
             "entity_selection": {
                 "title": "{category} — {step_position}",
                 "description": "Empty = monitor all. Next: {remaining_categories}",
-                "data": { "selected_objects": "Objects to monitor" },
-                "data_description": { "selected_objects": "Leave empty to monitor all (including future additions)" }
+                "data": {
+                    "selected_objects": "Objects to monitor"
+                },
+                "data_description": {
+                    "selected_objects": "Leave empty to monitor all (including future additions)"
+                }
             },
             "restrictions": {
                 "title": "Global Restrictions",
@@ -343,22 +526,55 @@
             "vm_select": {
                 "title": "Per-VM Restrictions",
                 "description": "Pick a VM to restrict, or **Skip** to continue.",
-                "data": { "vm_to_restrict": "Virtual machine" }
+                "data": {
+                    "vm_to_restrict": "Virtual machine"
+                }
             },
             "vm_actions": {
                 "title": "Restrictions for {vm_name}",
                 "description": "Select actions to block on this VM.",
-                "data": { "vm_blocked_actions": "Actions to block" }
+                "data": {
+                    "vm_blocked_actions": "Actions to block"
+                }
             },
             "host_select": {
                 "title": "Per-Host Restrictions",
                 "description": "Pick a host to restrict, or **Skip** to finish.",
-                "data": { "host_to_restrict": "ESXi host" }
+                "data": {
+                    "host_to_restrict": "ESXi host"
+                }
             },
             "host_actions": {
                 "title": "Restrictions for {host_name}",
                 "description": "Select actions to block on this host.",
-                "data": { "host_blocked_actions": "Actions to block" }
+                "data": {
+                    "host_blocked_actions": "Actions to block"
+                }
+            }
+        }
+    },
+    "selector": {
+        "vm_power_action": {
+            "options": {
+                "power_on": "Power on",
+                "power_off": "Power off",
+                "shutdown": "Guest shutdown",
+                "reboot": "Guest reboot",
+                "reset": "Hard reset",
+                "suspend": "Suspend"
+            }
+        },
+        "host_power_action": {
+            "options": {
+                "shutdown": "Shutdown",
+                "reboot": "Reboot"
+            }
+        },
+        "snapshot_which": {
+            "options": {
+                "all": "All",
+                "first": "First",
+                "last": "Last"
             }
         }
     },
@@ -367,22 +583,13 @@
             "name": "VM Power Control",
             "description": "Control the power state of a virtual machine.",
             "fields": {
-                "device_id": { "name": "Device", "description": "The virtual machine to control." },
+                "device_id": {
+                    "name": "Device",
+                    "description": "The virtual machine to control."
+                },
                 "action": {
                     "name": "Action",
-                    "description": "Power action to perform.",
-                    "selector": {
-                        "select": {
-                            "options": {
-                                "power_on": "Power on",
-                                "power_off": "Power off",
-                                "shutdown": "Guest shutdown",
-                                "reboot": "Guest reboot",
-                                "reset": "Hard reset",
-                                "suspend": "Suspend"
-                            }
-                        }
-                    }
+                    "description": "Power action to perform."
                 }
             }
         },
@@ -390,59 +597,85 @@
             "name": "Host Power Control",
             "description": "Shutdown or reboot an ESXi host.",
             "fields": {
-                "device_id": { "name": "Device", "description": "The ESXi host." },
+                "device_id": {
+                    "name": "Device",
+                    "description": "The ESXi host."
+                },
                 "action": {
                     "name": "Action",
-                    "description": "Power action to perform on the host.",
-                    "selector": {
-                        "select": {
-                            "options": { "shutdown": "Shutdown", "reboot": "Reboot" }
-                        }
-                    }
+                    "description": "Power action to perform on the host."
                 },
-                "force": { "name": "Force", "description": "Force the action even if VMs are running." }
+                "force": {
+                    "name": "Force",
+                    "description": "Force the action even if VMs are running."
+                }
             }
         },
         "host_power_policy": {
             "name": "Host Power Policy",
             "description": "Set the power management policy for an ESXi host.",
             "fields": {
-                "device_id": { "name": "Device", "description": "The ESXi host." },
-                "policy": { "name": "Policy", "description": "Power management policy key (use list_power_policies to discover values)." }
+                "device_id": {
+                    "name": "Device",
+                    "description": "The ESXi host."
+                },
+                "policy": {
+                    "name": "Policy",
+                    "description": "Power management policy key (use list_power_policies to discover values)."
+                }
             }
         },
         "host_maintenance_mode": {
             "name": "Host Maintenance Mode",
             "description": "Enable or disable maintenance mode on an ESXi host.",
             "fields": {
-                "device_id": { "name": "Device", "description": "The ESXi host." },
-                "enable": { "name": "Enable", "description": "Enter maintenance mode when on, exit when off." }
+                "device_id": {
+                    "name": "Device",
+                    "description": "The ESXi host."
+                },
+                "enable": {
+                    "name": "Enable",
+                    "description": "Enter maintenance mode when on, exit when off."
+                }
             }
         },
         "create_snapshot": {
             "name": "Create VM Snapshot",
             "description": "Create a snapshot of a virtual machine.",
             "fields": {
-                "device_id": { "name": "Device", "description": "The virtual machine." },
-                "name": { "name": "Name", "description": "Snapshot name (optional)." },
-                "description": { "name": "Description", "description": "Snapshot description (optional)." },
-                "memory": { "name": "Include memory", "description": "Include the VM's memory state in the snapshot." },
-                "quiesce": { "name": "Quiesce filesystem", "description": "Quiesce guest filesystem before snapshotting." }
+                "device_id": {
+                    "name": "Device",
+                    "description": "The virtual machine."
+                },
+                "name": {
+                    "name": "Name",
+                    "description": "Snapshot name (optional)."
+                },
+                "description": {
+                    "name": "Description",
+                    "description": "Snapshot description (optional)."
+                },
+                "memory": {
+                    "name": "Include memory",
+                    "description": "Include the VM's memory state in the snapshot."
+                },
+                "quiesce": {
+                    "name": "Quiesce filesystem",
+                    "description": "Quiesce guest filesystem before snapshotting."
+                }
             }
         },
         "remove_snapshot": {
             "name": "Remove VM Snapshot",
             "description": "Remove one or all snapshots from a virtual machine.",
             "fields": {
-                "device_id": { "name": "Device", "description": "The virtual machine." },
+                "device_id": {
+                    "name": "Device",
+                    "description": "The virtual machine."
+                },
                 "which": {
                     "name": "Which",
-                    "description": "Which snapshot to remove.",
-                    "selector": {
-                        "select": {
-                            "options": { "all": "All", "first": "First", "last": "Last" }
-                        }
-                    }
+                    "description": "Which snapshot to remove."
                 }
             }
         },
@@ -450,30 +683,48 @@
             "name": "Remove Snapshots",
             "description": "Remove one or more snapshots from a virtual machine by name. Pass \"all\" to remove all snapshots.",
             "fields": {
-                "device_id": { "name": "VM", "description": "The virtual machine to remove snapshots from." },
-                "snapshots": { "name": "Snapshots", "description": "List of snapshot names to remove. Use \"all\" to remove all snapshots." }
+                "device_id": {
+                    "name": "VM",
+                    "description": "The virtual machine to remove snapshots from."
+                },
+                "snapshots": {
+                    "name": "Snapshots",
+                    "description": "List of snapshot names to remove. Use \"all\" to remove all snapshots."
+                }
             }
         },
         "list_hosts": {
             "name": "List Hosts",
             "description": "Return a list of all ESXi hosts managed by this vSphere connection.",
             "fields": {
-                "device_id": { "name": "Device", "description": "Any device belonging to the vSphere connection." }
+                "device_id": {
+                    "name": "Device",
+                    "description": "Any device belonging to the vSphere connection."
+                }
             }
         },
         "list_power_policies": {
             "name": "List Power Policies",
             "description": "Return the available power management policies for an ESXi host.",
             "fields": {
-                "device_id": { "name": "Device", "description": "The ESXi host." }
+                "device_id": {
+                    "name": "Device",
+                    "description": "The ESXi host."
+                }
             }
         },
         "vm_migrate": {
             "name": "VM Migration (vMotion)",
             "description": "Live-migrate a virtual machine to a different host.",
             "fields": {
-                "device_id": { "name": "VM", "description": "The virtual machine to migrate." },
-                "target_host": { "name": "Target Host", "description": "The destination ESXi host device." }
+                "device_id": {
+                    "name": "VM",
+                    "description": "The virtual machine to migrate."
+                },
+                "target_host": {
+                    "name": "Target Host",
+                    "description": "The destination ESXi host device."
+                }
             }
         }
     }
