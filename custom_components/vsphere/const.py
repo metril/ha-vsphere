@@ -20,12 +20,16 @@ CONF_CATEGORIES: Final = "categories"
 CONF_ENTITY_FILTER: Final = "entity_filter"
 CONF_RESTRICTIONS: Final = "restrictions"
 CONF_PERF_INTERVAL: Final = "perf_interval"
+CONF_INVENTORY_INTERVAL: Final = "inventory_interval"
 # Defaults
 DEFAULT_PORT: Final = 443
 DEFAULT_VERIFY_SSL: Final = False
 DEFAULT_PERF_INTERVAL: Final = 300
 MIN_PERF_INTERVAL: Final = 60
 MAX_PERF_INTERVAL: Final = 3600
+DEFAULT_INVENTORY_INTERVAL: Final = 900  # 15 minutes
+MIN_INVENTORY_INTERVAL: Final = 300  # 5 minutes
+MAX_INVENTORY_INTERVAL: Final = 86400  # 24 hours
 
 # Entity filter modes
 FILTER_MODE_ALL: Final = "all"
@@ -125,3 +129,24 @@ CONN_TYPE_ESXI: Final = "esxi"
 
 # License filtering
 INVALID_LICENSE_KEY: Final = "00000-00000-00000-00000-00000"
+
+VM_POWER_STATE_MAP: Final[dict[str, str]] = {
+    "poweredOn": "running",
+    "poweredOff": "off",
+    "suspended": "suspended",
+}
+
+
+def derive_vm_state(power_state: str | None, connection_state: str | None) -> str:
+    """Combine a VM's power and connection state into the flat `state` value.
+
+    vCenter freezes powerState at its last known value when it can no longer
+    reach the VM's host, so connectionState is the authoritative signal.
+    Any non-"connected" value (disconnected/orphaned/inaccessible/invalid)
+    collapses to "disconnected".
+    """
+    if connection_state and connection_state != "connected":
+        return "disconnected"
+    if not power_state:
+        return "unknown"
+    return VM_POWER_STATE_MAP.get(power_state, power_state)

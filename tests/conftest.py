@@ -14,6 +14,7 @@ for mod in [
     "homeassistant.config_entries",
     "homeassistant.const",
     "homeassistant.core",
+    "homeassistant.data_entry_flow",
     "homeassistant.exceptions",
     "homeassistant.helpers",
     "homeassistant.helpers.device_registry",
@@ -30,3 +31,24 @@ for mod in [
     "voluptuous",
 ]:
     sys.modules.setdefault(mod, ha_mock)
+
+
+# config_flow.py defines `class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow,
+# domain=DOMAIN)` and `class VSphereOptionsFlow(_RestrictionFlowMixin,
+# OptionsFlowWithConfigEntry)`. Mixing a real class with a plain MagicMock *instance*
+# as a base raises "metaclass conflict" (the instance's metaclass is MagicMock, which
+# isn't a subclass of `type`). These stand-ins are real classes so the module imports
+# cleanly; the flow classes themselves are not under test — only module-level helpers
+# like `_duration_to_seconds()` are (see the CoordinatorEntity note in
+# tests/test_entity_connectivity.py's sibling harness constraint).
+class _StubConfigFlow:
+    def __init_subclass__(cls, *, domain=None, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+
+
+class _StubOptionsFlow:
+    pass
+
+
+ha_mock.ConfigFlow = _StubConfigFlow
+ha_mock.OptionsFlowWithConfigEntry = _StubOptionsFlow

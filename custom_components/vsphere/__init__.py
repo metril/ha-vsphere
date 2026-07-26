@@ -25,7 +25,7 @@ from .const import (
     DOMAIN,
     Category,
 )
-from .coordinator import VSphereData, VSpherePerfCoordinator
+from .coordinator import VSphereData, VSphereInventoryCoordinator, VSpherePerfCoordinator
 from .event_listener import VSphereEventListener
 from .exceptions import VSphereAuthError, VSphereConnectionError
 from .permissions import PermissionResolver
@@ -153,6 +153,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await hass.async_add_executor_job(event_listener.stop)
             await hass.async_add_executor_job(client.disconnect_poll)
             raise
+        # Registering a listener is what arms the perf coordinator's own refresh
+        # timer — HA only reschedules while a coordinator has listeners.
+        entry.async_on_unload(perf_coordinator.async_add_listener(coordinator.async_update_listeners))
+
+    # ------------------------------------------------------------------
+    # Optionally create the inventory coordinator (licenses/network/storage_advanced —
+    # categories PropertyCollector cannot watch)
+    # ------------------------------------------------------------------
+    inventory_coordinator: VSphereInventoryCoordinator | None = None
+    if any(categories.get(c) for c in (Category.LICENSES, Category.NETWORK, Category.STORAGE_ADVANCED)):
+        inventory_coordinator = VSphereInventoryCoordinator(hass, client, coordinator, entry, categories)
+        # Registering a listener arms the refresh timer — HA only reschedules
+        # a coordinator while it has listeners. No first refresh: the event
+        # listener's initial fetch already populated these categories.
+        entry.async_on_unload(inventory_coordinator.async_add_listener(coordinator.async_update_listeners))
 
     # ------------------------------------------------------------------
     # Store runtime objects in hass.data
@@ -163,6 +178,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
         "event_listener": event_listener,
         "perf_coordinator": perf_coordinator,
+        "inventory_coordinator": inventory_coordinator,
         "resolver": resolver,
     }
 
@@ -247,6 +263,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     event_listener: VSphereEventListener | None = entry_data.get("event_listener")
     perf_coordinator: VSpherePerfCoordinator | None = entry_data.get("perf_coordinator")
+    inventory_coordinator: VSphereInventoryCoordinator | None = entry_data.get("inventory_coordinator")
     client: VSphereClient | None = entry_data.get("client")
 
     # Unload platforms first to stop entity callbacks before tearing down data sources
@@ -259,6 +276,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Stop the perf coordinator (cancel its refresh timer)
     if perf_coordinator is not None:
         await perf_coordinator.async_shutdown()
+
+    # Stop the inventory coordinator (cancel its refresh timer)
+    if inventory_coordinator is not None:
+        await inventory_coordinator.async_shutdown()
 
     # Disconnect the poll connection
     if client is not None:

@@ -11,7 +11,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL, DOMAIN
+from .const import (
+    CONF_INVENTORY_INTERVAL,
+    CONF_PERF_INTERVAL,
+    DEFAULT_INVENTORY_INTERVAL,
+    DEFAULT_PERF_INTERVAL,
+    DOMAIN,
+    Category,
+)
 from .exceptions import VSphereAuthError, VSphereConnectionError
 
 if TYPE_CHECKING:
@@ -95,6 +102,17 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         self.async_set_updated_data(self._data)
 
     @callback
+    def async_set_connection_lost(self, message: str) -> None:
+        """Mark all entities on this coordinator unavailable.
+
+        Dispatched from the event listener thread via call_soon_threadsafe.
+        Recovery needs no counterpart call: a successful reconnect runs
+        _do_initial_fetch() -> async_set_initial_data() -> async_set_updated_data(),
+        which unconditionally resets last_update_success to True.
+        """
+        self.async_set_update_error(UpdateFailed(message))
+
+    @callback
     def async_remove_object(self, category: str, moref: str) -> None:
         """Remove an object that no longer exists."""
         if category in self._data:
@@ -128,6 +146,18 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         self.data = self._data
         self.async_set_updated_data(self._data)
         self.initial_data_ready.set()
+
+    @callback
+    def async_merge_inventory_data(self, data: dict[str, Any]) -> None:
+        """Merge a refresh of the categories PropertyCollector cannot watch.
+
+        Replaces each category dict wholesale (same rationale as
+        async_set_initial_data) so objects removed upstream don't linger.
+        """
+        for key in ("licenses", "networks", "storage_advanced"):
+            if key in data:
+                self._data[key] = data[key]
+        self.async_set_updated_data(self._data)
 
     def update_perf(self, perf_data: dict[str, Any]) -> None:
         """Update performance counter data."""
@@ -173,7 +203,6 @@ class VSpherePerfCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             perf_data: dict[str, Any] = await self.hass.async_add_executor_job(self._fetch_performance)
             self._vsphere_data.update_perf(perf_data)
-            self._vsphere_data.async_update_listeners()
             return perf_data
         except VSphereAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
@@ -190,3 +219,54 @@ class VSpherePerfCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ds_morefs = list(self._ds_morefs)
 
         return self._client.query_performance(host_morefs, vm_morefs, ds_morefs)
+
+
+class VSphereInventoryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Periodically refreshes categories PropertyCollector cannot watch.
+
+    Licenses, network, and advanced storage have no PropertyCollector filter,
+    so without this they would stay frozen at their initial-fetch values.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: VSphereClient,
+        vsphere_data: VSphereData,
+        entry: ConfigEntry,
+        categories: dict[str, bool],
+    ) -> None:
+        """Initialize VSphereInventoryCoordinator."""
+        interval: int = entry.options.get(CONF_INVENTORY_INTERVAL, DEFAULT_INVENTORY_INTERVAL)
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_{entry.entry_id}_inventory",
+            update_interval=timedelta(seconds=interval),
+        )
+        self._client = client
+        self._vsphere_data = vsphere_data
+        self._categories = categories
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch the enabled categories and merge them into VSphereData."""
+        try:
+            data: dict[str, Any] = await self.hass.async_add_executor_job(self._fetch)
+        except VSphereAuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except VSphereConnectionError as err:
+            raise UpdateFailed(str(err)) from err
+        self._vsphere_data.async_merge_inventory_data(data)
+        return data
+
+    def _fetch(self) -> dict[str, Any]:
+        """Fetch the enabled categories (runs in executor)."""
+        self._client.ensure_poll_connection()
+        result: dict[str, Any] = {}
+        if self._categories.get(Category.LICENSES):
+            result["licenses"] = self._client.get_licenses()
+        if self._categories.get(Category.NETWORK):
+            result["networks"] = self._client.get_networks()
+        if self._categories.get(Category.STORAGE_ADVANCED):
+            result["storage_advanced"] = self._client.get_vm_storage_details()
+        return result

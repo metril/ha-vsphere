@@ -22,6 +22,7 @@ from .const import (
     SNAP_ALL,
     SNAP_FIRST,
     SNAP_LAST,
+    derive_vm_state,
 )
 from .exceptions import VSphereAuthError, VSphereConnectionError, VSphereOperationError
 
@@ -1420,6 +1421,8 @@ class VSphereClient:
             "summary.storage.committed",
             "runtime.host",
             "runtime.powerState",
+            "summary.runtime.connectionState",
+            "runtime.connectionState",
             "runtime.maxCpuUsage",
             "snapshot",
             "configStatus",
@@ -1671,13 +1674,9 @@ class VSphereClient:
             # Power state
             raw_state = str(runtime.powerState) if runtime else "unknown"
             data["power_state"] = raw_state
-
-            state_map = {
-                "poweredOn": "running",
-                "poweredOff": "off",
-                "suspended": "suspended",
-            }
-            data["state"] = state_map.get(raw_state, raw_state)
+            raw_conn = str(runtime.connectionState) if runtime else "unknown"
+            data["connection_state"] = raw_conn
+            data["state"] = derive_vm_state(raw_state, raw_conn)
             data["status"] = str(summary.overallStatus) if summary.overallStatus else "gray"
 
             # Storage

@@ -104,6 +104,15 @@ class _VSphereButton(VSphereEntity, ButtonEntity):
         self._entry_id = entry.entry_id
         self._attr_unique_id = f"{entry.entry_id}_{moref}_{self._unique_id_suffix}"
 
+    @property
+    def available(self) -> bool:
+        """VM buttons are unavailable while the VM is unreachable."""
+        if not super().available:
+            return False
+        if self._object_type == "vms":
+            return not self._vm_is_disconnected()
+        return True
+
     async def async_press(self) -> None:
         """Handle button press — implemented by subclasses."""
         raise NotImplementedError

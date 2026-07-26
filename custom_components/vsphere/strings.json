@@ -150,7 +150,8 @@
                             "storage_advanced": "Advanced Storage",
                             "performance": "Performance Metrics",
                             "events_alarms": "Events & Alarms",
-                            "perf_interval": "Performance polling interval"
+                            "perf_interval": "Performance polling interval",
+                            "inventory_interval": "Inventory refresh interval"
                         },
                         "data_description": {
                             "clusters": "Monitor DRS and HA cluster status",
@@ -159,7 +160,8 @@
                             "storage_advanced": "Per-VM disk and storage policy details",
                             "performance": "Real-time CPU/memory/disk/network metrics (polled)",
                             "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour"
+                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour",
+                            "inventory_interval": "How often to re-fetch licenses, network, and advanced storage data — vSphere cannot push these. Lower values increase API load, especially with many VMs. Minimum 5 minutes, maximum 24 hours"
                         }
                     }
                 }
@@ -300,7 +302,8 @@
                             "storage_advanced": "Advanced Storage",
                             "performance": "Performance Metrics",
                             "events_alarms": "Events & Alarms",
-                            "perf_interval": "Performance polling interval"
+                            "perf_interval": "Performance polling interval",
+                            "inventory_interval": "Inventory refresh interval"
                         },
                         "data_description": {
                             "clusters": "Monitor DRS and HA cluster status",
@@ -309,7 +312,8 @@
                             "storage_advanced": "Per-VM disk and storage policy details",
                             "performance": "Real-time CPU/memory/disk/network metrics (polled)",
                             "events_alarms": "vSphere alarm tracking and HA event notifications",
-                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour"
+                            "perf_interval": "How often to poll performance metrics. Lower values increase API load. Minimum 1 minute, maximum 1 hour",
+                            "inventory_interval": "How often to re-fetch licenses, network, and advanced storage data — vSphere cannot push these. Lower values increase API load, especially with many VMs. Minimum 5 minutes, maximum 24 hours"
                         }
                     }
                 }

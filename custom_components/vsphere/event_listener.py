@@ -9,7 +9,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
-from .const import Category
+from .const import Category, derive_vm_state
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -21,6 +21,11 @@ _LOGGER = logging.getLogger(__name__)
 
 BACKOFF_SCHEDULE: list[int] = [5, 10, 30, 60]
 WAIT_OPTIONS_MAX_WAIT: int = 60
+
+# Consecutive failed reconnects before entities are marked unavailable. One
+# transient WaitForUpdatesEx error usually self-heals on the next reconnect;
+# requiring two means ~15s of genuine unreachability before entities flap.
+CONNECTION_LOST_THRESHOLD: int = 2
 
 # PropertyCollector path → flat entity key translation maps
 _HOST_PROP_MAP: dict[str, str] = {
@@ -49,6 +54,8 @@ _VM_PROP_MAP: dict[str, str] = {
     "summary.config.guestFullName": "_configured_guest_os",
     "summary.runtime.powerState": "power_state",
     "runtime.powerState": "power_state",
+    "summary.runtime.connectionState": "connection_state",
+    "runtime.connectionState": "connection_state",
     "summary.overallStatus": "status",
     "summary.quickStats.overallCpuUsage": "_cpu_usage_raw",
     "summary.quickStats.hostMemoryUsage": "memory_used_mb",
@@ -70,6 +77,28 @@ _DATASTORE_PROP_MAP: dict[str, str] = {
     "summary.capacity": "_capacity_raw",
     "summary.freeSpace": "_free_raw",
     "host": "_host_list",
+    "vm": "_vm_list",
+}
+
+_CLUSTER_PROP_MAP: dict[str, str] = {
+    "name": "name",
+    "configuration.drsConfig.enabled": "drs_enabled",
+    "configuration.drsConfig.defaultVmBehavior": "drs_automation_level",
+    "configuration.dasConfig.enabled": "ha_enabled",
+    "configuration.dasConfig.admissionControlEnabled": "ha_admission_control",
+    "summary.numHosts": "total_hosts",
+    "summary.numEffectiveHosts": "effective_hosts",
+    "summary.totalCpu": "total_cpu_mhz",
+    "summary.totalMemory": "_total_memory_raw",
+    "host": "_host_list",
+}
+
+_RESOURCE_POOL_PROP_MAP: dict[str, str] = {
+    "name": "name",
+    "config.cpuAllocation.reservation": "cpu_reservation_mhz",
+    "config.cpuAllocation.limit": "cpu_limit_mhz",
+    "config.memoryAllocation.reservation": "memory_reservation_mb",
+    "config.memoryAllocation.limit": "memory_limit_mb",
     "vm": "_vm_list",
 }
 
@@ -112,6 +141,17 @@ class VSphereEventListener:
         # Suppresses delta dispatch during initial fetch / reconnect to prevent
         # double-counting when the push loop re-delivers enter events.
         self._initial_fetch_in_progress = False
+        # Thread-owned shadow copy of pushed state — read by the derive helpers
+        # instead of reaching into the coordinator's dict from this thread.
+        self._local_state_cache: dict[str, dict[str, dict[str, Any]]] = {
+            "hosts": {},
+            "vms": {},
+            "datastores": {},
+            "clusters": {},
+            "resource_pools": {},
+        }
+        # alarm definition key → human-readable name, resolved at initial fetch
+        self._alarm_name_cache: dict[str, str] = {}
 
     def start(self) -> None:
         """Start listener (called from executor). Connects, fetches initial data, starts loop."""
@@ -202,6 +242,25 @@ class VSphereEventListener:
                     len(self._vm_power_cache),
                 )
 
+            # Refresh the thread-owned shadow caches from the freshly fetched data.
+            # A shallow dict(row) per row is deliberate — the only nested mutables
+            # (snapshots, available_power_policies) are always replaced wholesale,
+            # never mutated in place, so sharing the reference is safe and avoids
+            # a deepcopy cost on large inventories.
+            self._local_state_cache = {
+                "hosts": {m: dict(row) for m, row in initial_data.get("hosts", {}).items()},
+                "vms": {m: dict(row) for m, row in initial_data.get("vms", {}).items()},
+                "datastores": {m: dict(row) for m, row in initial_data.get("datastores", {}).items()},
+                "clusters": {m: dict(row) for m, row in initial_data.get("clusters", {}).items()},
+                "resource_pools": {m: dict(row) for m, row in initial_data.get("resource_pools", {}).items()},
+            }
+            self._alarm_name_cache = {
+                a["alarm_key"]: a["alarm_name"]
+                for alarm_list in initial_data.get("alarms", {}).values()
+                for a in alarm_list
+                if a.get("alarm_key") and a.get("alarm_name")
+            }
+
             # Block until async_set_initial_data has executed on the event loop.
             # This prevents push updates from writing into coordinator data that is
             # about to be replaced, and ensures _initial_fetch_in_progress is only
@@ -243,6 +302,7 @@ class VSphereEventListener:
         """Background thread: WaitForUpdatesEx loop."""
         version = ""
         backoff_index = 0
+        consecutive_failures = 0
         while not self._stop_event.is_set():
             try:
                 wait_options = self._create_wait_options()
@@ -251,6 +311,7 @@ class VSphereEventListener:
                     continue  # timeout, no changes
                 version = update_set.version
                 backoff_index = 0
+                consecutive_failures = 0
                 for filter_update in update_set.filterSet:
                     for obj_update in filter_update.objectSet:
                         self._process_object_update(obj_update)
@@ -271,8 +332,15 @@ class VSphereEventListener:
                 try:
                     self._reconnect()
                     version = ""
+                    consecutive_failures = 0
                 except Exception as reconnect_err:  # noqa: BLE001
-                    _LOGGER.error("Reconnect failed: %s", reconnect_err)
+                    consecutive_failures += 1
+                    _LOGGER.error("Reconnect failed (%d consecutive): %s", consecutive_failures, reconnect_err)
+                    if consecutive_failures >= CONNECTION_LOST_THRESHOLD:
+                        self._hass.loop.call_soon_threadsafe(
+                            self._vsphere_data.async_set_connection_lost,
+                            f"vSphere push connection lost: {reconnect_err}",
+                        )
 
     def _create_wait_options(self) -> Any:
         """Create WaitOptions with maxWaitSeconds set."""
@@ -304,6 +372,9 @@ class VSphereEventListener:
         )
 
         if kind == "leave":
+            # Popping unconditionally is harmless when the moref was never cached
+            # (e.g. it was filtered out) and keeps this branch simple.
+            self._local_state_cache.get(category, {}).pop(moref, None)
             if not is_filtered_out:
                 self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_remove_object, category, moref)
                 self._fire_event(
@@ -350,6 +421,14 @@ class VSphereEventListener:
         # Translate raw PropertyCollector paths to flat entity keys
         translated = self._translate_properties(category, properties, moref)
 
+        # Keep the local shadow cache in lockstep with what's sent to the coordinator.
+        # Must happen after translation — _translate_properties reads `stored` from
+        # this cache, so updating it first would make a delta see its own new values
+        # as "already stored".
+        if category in self._local_state_cache:
+            row = self._local_state_cache[category].setdefault(moref, {"moref": moref})
+            row.update(translated)
+
         self._hass.loop.call_soon_threadsafe(
             self._vsphere_data.async_update_from_push,
             category,
@@ -367,8 +446,13 @@ class VSphereEventListener:
             prop_map = _VM_PROP_MAP
         elif category == "datastores":
             prop_map = _DATASTORE_PROP_MAP
+        elif category == "clusters":
+            prop_map = _CLUSTER_PROP_MAP
+        elif category == "resource_pools":
+            prop_map = _RESOURCE_POOL_PROP_MAP
         else:
-            return raw_props
+            _LOGGER.warning("No property translation map for category '%s'; dropping update", category)
+            return {}
 
         translated: dict[str, Any] = {}
         for raw_key, value in raw_props.items():
@@ -376,13 +460,17 @@ class VSphereEventListener:
             translated[flat_key if flat_key else raw_key] = value
 
         # Pass existing stored data for lookups (e.g., max_cpu_mhz for CPU % derivation)
-        stored = self._vsphere_data._data.get(category, {}).get(moref, {}) if moref else {}  # noqa: SLF001
+        stored = self._local_state_cache.get(category, {}).get(moref, {}) if moref else {}
         if category == "hosts":
             self._derive_host_values(translated, stored)
         elif category == "vms":
             self._derive_vm_values(translated, stored)
         elif category == "datastores":
             self._derive_datastore_values(translated, stored)
+        elif category == "clusters":
+            self._derive_cluster_values(translated, stored)
+        elif category == "resource_pools":
+            self._derive_resource_pool_values(translated, stored)
 
         return {k: v for k, v in translated.items() if not k.startswith("_")}
 
@@ -423,10 +511,17 @@ class VSphereEventListener:
 
     def _derive_vm_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived VM values from raw inputs."""
+        stored = stored or {}
+        if d.get("connection_state") is not None:
+            d["connection_state"] = str(d["connection_state"])
         if d.get("power_state") is not None:
             d["power_state"] = str(d["power_state"])
-            d["state"] = {"poweredOn": "running", "poweredOff": "off", "suspended": "suspended"}.get(
-                d["power_state"], d["power_state"]
+        # Recompute `state` when EITHER field is present in this delta, falling
+        # back to stored values for the one that isn't — pushes are partial merges.
+        if "power_state" in d or "connection_state" in d:
+            d["state"] = derive_vm_state(
+                d.get("power_state", stored.get("power_state")),
+                d.get("connection_state", stored.get("connection_state")),
             )
         if "_uptime_raw" in d:
             val = d.pop("_uptime_raw")
@@ -436,7 +531,7 @@ class VSphereEventListener:
             d["max_cpu_mhz"] = d.pop("_max_cpu")
         if "_cpu_usage_raw" in d:
             usage = d.pop("_cpu_usage_raw")
-            max_cpu = d.get("max_cpu_mhz") or (stored or {}).get("max_cpu_mhz")
+            max_cpu = d.get("max_cpu_mhz") or stored.get("max_cpu_mhz")
             if usage is not None and max_cpu:
                 d["cpu_use_pct"] = round((usage / max_cpu) * 100, 2)
             else:
@@ -453,8 +548,7 @@ class VSphereEventListener:
                 with contextlib.suppress(Exception):
                     host_moref = str(host_obj._moId)
                     d["host_moref"] = host_moref
-                    # Look up host_name from coordinator's hosts data (in-memory, GIL-safe)
-                    host_data = self._vsphere_data._data.get("hosts", {}).get(host_moref)  # noqa: SLF001
+                    host_data = self._local_state_cache.get("hosts", {}).get(host_moref)
                     if host_data:
                         d["host_name"] = host_data.get("name", host_moref)
         if "_snapshot_obj" in d:
@@ -493,6 +587,30 @@ class VSphereEventListener:
         if "_vm_list" in d:
             val = d.pop("_vm_list")
             d["virtual_machines"] = len(val) if val else 0
+
+    def _derive_cluster_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
+        """Compute derived cluster values from raw inputs."""
+        stored = stored or {}
+        if "_total_memory_raw" in d:
+            val = d.pop("_total_memory_raw")
+            d["total_memory_mb"] = round(val / (1024 * 1024), 0) if val else 0
+        # Raw MoRef list — discard. cluster vm_count in get_clusters() comes from
+        # cluster.resourcePool.vm, a different managed object not reachable through
+        # this pathSet (would need a second TraversalSpec into vim.ResourcePool),
+        # so vm_count stays initial-fetch-only; this is not a regression.
+        d.pop("_host_list", None)
+        if d.get("drs_automation_level") is not None:
+            d["drs_automation_level"] = str(d["drs_automation_level"])
+        # get_clusters() reports no automation level while DRS is off — mirror that.
+        drs_enabled = d.get("drs_enabled", stored.get("drs_enabled"))
+        if drs_enabled is False:
+            d["drs_automation_level"] = None
+
+    def _derive_resource_pool_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
+        """Compute derived resource pool values from raw inputs."""
+        if "_vm_list" in d:
+            val = d.pop("_vm_list")
+            d["vm_count"] = len(val) if val else 0
 
     @staticmethod
     def _flatten_snapshots(snapshot_list: Any) -> list[dict[str, str]]:
@@ -632,11 +750,16 @@ class VSphereEventListener:
         if alarm_states:
             for alarm_state in alarm_states:
                 try:
-                    # Use alarm_state.key as the name — accessing alarm_state.alarm.info.name
-                    # would trigger a live RPC on the push thread (forbidden by architecture)
+                    # Accessing alarm_state.alarm.info.name would trigger a live RPC on
+                    # the push thread (forbidden by architecture), so resolve the name
+                    # from the cache populated at the last initial fetch/reconnect
+                    # instead. An alarm definition first seen after that point (e.g. a
+                    # brand-new alarm type triggered mid-session) falls back to its raw
+                    # key until the next reconnect rebuilds the cache.
+                    alarm_key = str(alarm_state.key)
                     alarm_info = {
-                        "alarm_key": str(alarm_state.key),
-                        "alarm_name": str(alarm_state.key),
+                        "alarm_key": alarm_key,
+                        "alarm_name": self._alarm_name_cache.get(alarm_key, alarm_key),
                         "status": str(alarm_state.overallStatus),
                         "time": str(alarm_state.time) if alarm_state.time else None,
                         "acknowledged": getattr(alarm_state, "acknowledged", False),
@@ -651,8 +774,10 @@ class VSphereEventListener:
         old_alarms = self._alarm_cache.get(moref, [])
         old_statuses = {a.get("alarm_key"): a.get("status") for a in old_alarms}
 
-        # Entity name: use moref as a safe fallback (no cross-thread coordinator read)
-        entity_name: str = moref
+        # Entity name: resolve from the local shadow cache (thread-owned, no
+        # cross-thread coordinator read), falling back to moref if not yet cached.
+        category = "hosts" if entity_type == "host" else "vms"
+        entity_name: str = self._local_state_cache.get(category, {}).get(moref, {}).get("name", moref)
 
         # Fire events for changed alarms — skip first-seen (no prior record) to avoid
         # spurious events on initial load
@@ -694,9 +819,13 @@ class VSphereEventListener:
         self._hass.loop.call_soon_threadsafe(self._hass.bus.async_fire, event_type, data)
 
     def _trigger_reauth(self) -> None:
-        """Trigger a config entry reload due to auth failure."""
+        """Mark entities unavailable and reload the entry after an auth failure."""
         from homeassistant.config_entries import ConfigEntryState  # noqa: PLC0415
 
+        # Called directly (not via call_soon_threadsafe) because _trigger_reauth
+        # is itself only ever invoked through call_soon_threadsafe, so it already
+        # runs on the event loop.
+        self._vsphere_data.async_set_connection_lost("vSphere authentication failed; reauthentication required")
         entry = self._hass.config_entries.async_get_entry(self._entry_id)
         if entry and entry.state == ConfigEntryState.LOADED:
             self._hass.config_entries.async_schedule_reload(self._entry_id)
@@ -719,4 +848,12 @@ class VSphereEventListener:
         )
         self._alarm_cache.clear()
         self._vm_power_cache.clear()
+        self._local_state_cache = {
+            "hosts": {},
+            "vms": {},
+            "datastores": {},
+            "clusters": {},
+            "resource_pools": {},
+        }
+        self._alarm_name_cache.clear()
         self._do_initial_fetch()

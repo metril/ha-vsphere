@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-    from .coordinator import VSphereData
+    from .coordinator import VSphereData, VSpherePerfCoordinator
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -37,6 +37,7 @@ class VSphereSensorDescription(SensorEntityDescription):
     """Describes a vSphere sensor."""
 
     value_fn: Callable[[dict[str, Any]], Any] = lambda d: None
+    runtime_only: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +130,7 @@ VM_SENSORS: tuple[VSphereSensorDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("cpu_use_pct"),
+        runtime_only=True,
     ),
     VSphereSensorDescription(
         key="memory_allocated_mb",
@@ -147,6 +149,7 @@ VM_SENSORS: tuple[VSphereSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfInformation.MEGABYTES,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("memory_used_mb"),
+        runtime_only=True,
     ),
     VSphereSensorDescription(
         key="memory_active_mb",
@@ -156,6 +159,7 @@ VM_SENSORS: tuple[VSphereSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfInformation.MEGABYTES,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("memory_active_mb"),
+        runtime_only=True,
     ),
     VSphereSensorDescription(
         key="used_space_gb",
@@ -174,6 +178,7 @@ VM_SENSORS: tuple[VSphereSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTime.HOURS,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.get("uptime_hours"),
+        runtime_only=True,
     ),
     VSphereSensorDescription(
         key="snapshots",
@@ -195,6 +200,7 @@ VM_SENSORS: tuple[VSphereSensorDescription, ...] = (
         name="Guest IP",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: d.get("guest_ip"),
+        runtime_only=True,
     ),
     VSphereSensorDescription(
         key="status",
@@ -700,6 +706,7 @@ async def async_setup_entry(
     """Set up vSphere sensors from a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: VSphereData = data["coordinator"]
+    perf_coordinator: VSpherePerfCoordinator | None = data.get("perf_coordinator")
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
 
     entities: list[VSphereSensor | VSpherePerfSensor | VSphereAlarmSensor] = []
@@ -811,15 +818,17 @@ async def async_setup_entry(
         for moref, obj_data in coordinator.data.get("hosts", {}).items():
             name = obj_data.get("name", moref)
             for desc in HOST_PERF_SENSORS:
-                entities.append(VSpherePerfSensor(coordinator, entry, "hosts", moref, name, desc))
+                entities.append(VSpherePerfSensor(coordinator, entry, "hosts", moref, name, desc, perf_coordinator))
         for moref, obj_data in coordinator.data.get("vms", {}).items():
             name = obj_data.get("name", moref)
             for desc in VM_PERF_SENSORS:
-                entities.append(VSpherePerfSensor(coordinator, entry, "vms", moref, name, desc))
+                entities.append(VSpherePerfSensor(coordinator, entry, "vms", moref, name, desc, perf_coordinator))
         for moref, obj_data in coordinator.data.get("datastores", {}).items():
             name = obj_data.get("name", moref)
             for desc in DATASTORE_PERF_SENSORS:
-                entities.append(VSpherePerfSensor(coordinator, entry, "datastores", moref, name, desc))
+                entities.append(
+                    VSpherePerfSensor(coordinator, entry, "datastores", moref, name, desc, perf_coordinator)
+                )
 
     # Storage advanced sensors — attach to parent VM device, read from "storage_advanced" data
     if categories.get(Category.STORAGE_ADVANCED):
@@ -901,6 +910,11 @@ class VSphereSensor(VSphereEntity, SensorEntity):
         obj_data = self._get_data()
         if obj_data is None:
             return None
+        if self._object_type == "vms" and self._vm_is_disconnected():
+            if self.entity_description.key == "status":
+                return "disconnected"
+            if self.entity_description.runtime_only:
+                return None
         return self.entity_description.value_fn(obj_data)
 
 
@@ -953,11 +967,13 @@ class VSpherePerfSensor(VSphereEntity, SensorEntity):
         moref: str,
         name: str,
         description: VSphereSensorDescription,
+        perf_coordinator: VSpherePerfCoordinator | None,
     ) -> None:
         """Initialize the performance sensor."""
         super().__init__(coordinator, entry, object_type, moref, name)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{moref}_{description.key}"
+        self._perf_coordinator = perf_coordinator
 
     @property
     def native_value(self) -> Any:
@@ -966,6 +982,13 @@ class VSpherePerfSensor(VSphereEntity, SensorEntity):
             return None
         perf_data = self.coordinator.data.get("perf", {}).get(self._moref, {})
         return self.entity_description.value_fn(perf_data)
+
+    @property
+    def available(self) -> bool:
+        """Also unavailable when performance polling itself is failing."""
+        if self._perf_coordinator is not None and not self._perf_coordinator.last_update_success:
+            return False
+        return super().available
 
 
 class VSphereAlarmSensor(VSphereEntity, SensorEntity):

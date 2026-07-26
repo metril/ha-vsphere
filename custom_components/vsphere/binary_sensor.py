@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -30,6 +30,7 @@ class VSphereBinarySensorDescription(BinarySensorEntityDescription):
     """Describes a vSphere binary sensor."""
 
     value_fn: Callable[[dict[str, Any]], bool | None] = lambda d: None
+    disconnect_behavior: Literal["off", "unknown"] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +68,7 @@ VM_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
         name="Powered On",
         device_class=BinarySensorDeviceClass.POWER,
         value_fn=lambda d: d.get("power_state") == "poweredOn",
+        disconnect_behavior="off",
     ),
     VSphereBinarySensorDescription(
         key="tools_running",
@@ -74,6 +76,7 @@ VM_BINARY_SENSORS: tuple[VSphereBinarySensorDescription, ...] = (
         name="VMware Tools Running",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: d.get("tools_status") in ("toolsOk", "toolsOld"),
+        disconnect_behavior="off",
     ),
 )
 
@@ -283,6 +286,8 @@ class VSphereBinarySensor(VSphereEntity, BinarySensorEntity):
         obj_data = self._get_data()
         if obj_data is None:
             return None
+        if self._object_type == "vms" and self.entity_description.disconnect_behavior and self._vm_is_disconnected():
+            return False if self.entity_description.disconnect_behavior == "off" else None
         return self.entity_description.value_fn(obj_data)
 
 

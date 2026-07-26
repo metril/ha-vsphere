@@ -30,6 +30,7 @@ from .const import (
     CONF_CATEGORIES,
     CONF_ENTITY_FILTER,
     CONF_HOST,
+    CONF_INVENTORY_INTERVAL,
     CONF_PASSWORD,
     CONF_PERF_INTERVAL,
     CONF_PORT,
@@ -38,13 +39,16 @@ from .const import (
     CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_CATEGORIES,
+    DEFAULT_INVENTORY_INTERVAL,
     DEFAULT_PERF_INTERVAL,
     DEFAULT_PORT,
     DEFAULT_VERIFY_SSL,
     DOMAIN,
     FILTER_MODE_ALL,
     FILTER_MODE_SELECT,
+    MAX_INVENTORY_INTERVAL,
     MAX_PERF_INTERVAL,
+    MIN_INVENTORY_INTERVAL,
     MIN_PERF_INTERVAL,
     Category,
 )
@@ -55,6 +59,15 @@ from .vsphere_client import VSphereClient
 def _seconds_to_duration(seconds: int) -> dict[str, int]:
     """Convert seconds to a duration dict for DurationSelector."""
     return {"hours": seconds // 3600, "minutes": (seconds % 3600) // 60, "seconds": seconds % 60}
+
+
+def _duration_to_seconds(raw: Any, minimum: int, maximum: int) -> int:
+    """Convert a DurationSelector value (dict or int) to clamped seconds."""
+    if isinstance(raw, dict):
+        seconds = int(raw.get("hours", 0)) * 3600 + int(raw.get("minutes", 0)) * 60 + int(raw.get("seconds", 0))
+    else:
+        seconds = int(raw)
+    return max(minimum, min(maximum, seconds))
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -130,6 +143,7 @@ def _connection_schema(
 def _categories_schema(
     defaults: dict[str, bool] | None = None,
     perf_interval: int = DEFAULT_PERF_INTERVAL,
+    inventory_interval: int = DEFAULT_INVENTORY_INTERVAL,
 ) -> vol.Schema:
     """Return the categories step schema with core and advanced sections."""
     effective = dict(DEFAULT_CATEGORIES)
@@ -148,6 +162,9 @@ def _categories_schema(
         for cat in _ADVANCED_CATEGORIES
     }
     advanced_fields[vol.Required(CONF_PERF_INTERVAL, default=_seconds_to_duration(perf_interval))] = DurationSelector()
+    advanced_fields[vol.Required(CONF_INVENTORY_INTERVAL, default=_seconds_to_duration(inventory_interval))] = (
+        DurationSelector()
+    )
     advanced_schema = vol.Schema(advanced_fields)
 
     return vol.Schema(
@@ -192,24 +209,17 @@ def _flatten_ssl_section(user_input: dict[str, Any]) -> dict[str, Any]:
     return user_input
 
 
-def _flatten_category_sections(user_input: dict[str, Any]) -> tuple[dict[str, bool], int]:
-    """Flatten core/advanced sections and return (categories, perf_interval)."""
+def _flatten_category_sections(user_input: dict[str, Any]) -> tuple[dict[str, bool], int, int]:
+    """Flatten core/advanced sections and return (categories, perf_interval, inventory_interval)."""
     core = user_input.pop("core_categories", {})
     advanced = user_input.pop("advanced_categories", {})
     merged = {**core, **advanced}
     categories = {cat.value: merged.get(cat.value, False) for cat in Category}
-    raw_interval = merged.get(CONF_PERF_INTERVAL, {})
-    if isinstance(raw_interval, dict):
-        # DurationSelector returns {"hours": h, "minutes": m, "seconds": s}
-        perf_interval = (
-            int(raw_interval.get("hours", 0)) * 3600
-            + int(raw_interval.get("minutes", 0)) * 60
-            + int(raw_interval.get("seconds", 0))
-        )
-    else:
-        perf_interval = int(raw_interval)
-    perf_interval = max(MIN_PERF_INTERVAL, min(MAX_PERF_INTERVAL, perf_interval))
-    return categories, perf_interval
+    perf_interval = _duration_to_seconds(merged.get(CONF_PERF_INTERVAL, {}), MIN_PERF_INTERVAL, MAX_PERF_INTERVAL)
+    inventory_interval = _duration_to_seconds(
+        merged.get(CONF_INVENTORY_INTERVAL, {}), MIN_INVENTORY_INTERVAL, MAX_INVENTORY_INTERVAL
+    )
+    return categories, perf_interval, inventory_interval
 
 
 # ======================================================================
@@ -466,6 +476,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
         self._current_filter_category: Category | None = None
         self._restrictions: dict[str, Any] = {}
         self._perf_interval: int = DEFAULT_PERF_INTERVAL
+        self._inventory_interval: int = DEFAULT_INVENTORY_INTERVAL
         self._current_vm_moref: str | None = None
         self._current_host_moref: str | None = None
 
@@ -515,7 +526,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
     async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle monitoring category selection."""
         if user_input is not None:
-            self._categories, self._perf_interval = _flatten_category_sections(user_input)
+            self._categories, self._perf_interval, self._inventory_interval = _flatten_category_sections(user_input)
             return await self._start_entity_selection()
 
         return self.async_show_form(
@@ -767,6 +778,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
             CONF_ENTITY_FILTER: self._entity_filter,
             CONF_RESTRICTIONS: self._restrictions,
             CONF_PERF_INTERVAL: self._perf_interval,
+            CONF_INVENTORY_INTERVAL: self._inventory_interval,
         }
 
         return self.async_create_entry(
@@ -790,6 +802,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
         current = dict(config_entry.options)
         self._new_categories: dict[str, bool] = dict(current.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
         self._new_perf_interval: int = current.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)
+        self._new_inventory_interval: int = current.get(CONF_INVENTORY_INTERVAL, DEFAULT_INVENTORY_INTERVAL)
         self._entity_filter: dict[str, Any] = dict(current.get(CONF_ENTITY_FILTER, {}))
         self._restrictions: dict[str, Any] = copy.deepcopy(current.get(CONF_RESTRICTIONS, {}))
         self._inventory: dict[str, dict[str, Any]] = {}
@@ -877,12 +890,14 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
     async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Single-form sub-flow for monitoring categories."""
         if user_input is not None:
-            self._new_categories, self._new_perf_interval = _flatten_category_sections(user_input)
+            self._new_categories, self._new_perf_interval, self._new_inventory_interval = _flatten_category_sections(
+                user_input
+            )
             return await self.async_step_init()
 
         return self.async_show_form(
             step_id="categories",
-            data_schema=_categories_schema(self._new_categories, self._new_perf_interval),
+            data_schema=_categories_schema(self._new_categories, self._new_perf_interval, self._new_inventory_interval),
             last_step=True,
         )
 
@@ -975,6 +990,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
                 **dict(self.config_entry.options),
                 CONF_CATEGORIES: self._new_categories,
                 CONF_PERF_INTERVAL: self._new_perf_interval,
+                CONF_INVENTORY_INTERVAL: self._new_inventory_interval,
                 CONF_ENTITY_FILTER: self._entity_filter,
                 CONF_RESTRICTIONS: self._restrictions,
             }

@@ -189,6 +189,11 @@ class VmPowerOperationSelect(VSphereEntity, SelectEntity):
         self._attr_options = list(VM_POWER_OPERATIONS)
         self._attr_current_option = self._attr_options[0]
 
+    @property
+    def available(self) -> bool:
+        """Unavailable while the VM is unreachable."""
+        return super().available and not self._vm_is_disconnected()
+
     async def async_select_option(self, option: str) -> None:
         """Update the selected power operation."""
         self._attr_current_option = option
@@ -240,11 +245,11 @@ class VmSnapshotSelect(VSphereEntity, SelectEntity):
 
     @property
     def available(self) -> bool:
-        """Unavailable when the VM has no snapshots."""
+        """Unavailable when the VM has no snapshots or is unreachable."""
         obj_data = self._get_data()
         if obj_data is None:
             return False
-        return bool(obj_data.get("snapshots")) and super().available
+        return bool(obj_data.get("snapshots")) and super().available and not self._vm_is_disconnected()
 
     @property
     def options(self) -> list[str]:

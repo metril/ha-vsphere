@@ -14,6 +14,30 @@ from .const import DOMAIN
 from .coordinator import VSphereData
 
 
+def is_vm_disconnected(coordinator_data: dict[str, Any], vm_moref: str) -> bool:
+    """True if a VM should be treated as unreachable.
+
+    Checks the VM's own connectionState first, then cascades to its parent
+    host — vCenter does not always push a VM-level change when a host drops.
+    """
+    vm_data = coordinator_data.get("vms", {}).get(vm_moref)
+    if vm_data is None:
+        return True
+    if vm_data.get("connection_state") not in (None, "", "connected"):
+        return True
+    host_moref = vm_data.get("host_moref")
+    if not host_moref:
+        return False
+    host_data = coordinator_data.get("hosts", {}).get(host_moref)
+    if not host_data:
+        # Hosts category disabled or host not yet known — fail open.
+        return False
+    return host_data.get("connection_state") not in (None, "connected") or host_data.get("state") not in (
+        None,
+        "poweredOn",
+    )
+
+
 class VSphereEntity(CoordinatorEntity[VSphereData]):
     """Base entity for vSphere devices."""
 
@@ -47,6 +71,12 @@ class VSphereEntity(CoordinatorEntity[VSphereData]):
         if not self.coordinator.data:
             return None
         return self.coordinator.data.get(self._object_type, {}).get(self._moref)
+
+    def _vm_is_disconnected(self) -> bool:
+        """Whether this VM-scoped entity's VM is unreachable."""
+        if not self.coordinator.data:
+            return True
+        return is_vm_disconnected(self.coordinator.data, self._moref)
 
     @staticmethod
     def _build_device_info(
