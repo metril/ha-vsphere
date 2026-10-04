@@ -2,16 +2,35 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
+      - name: Create release if version is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(jq -r .version custom_components/vsphere/manifest.json)
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version in manifest.json: '$V'" >&2
+            exit 1
+          fi
+          if gh release view "v$V" >/dev/null 2>&1; then
+            echo "Release v$V already exists, skipping" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh release create "v$V" --target "$GITHUB_SHA" --title "v$V" --generate-notes
+          echo "Created release v$V" >> "$GITHUB_STEP_SUMMARY"

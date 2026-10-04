@@ -179,6 +179,11 @@ class VSphereEventListener:
         """Stop the listener."""
         _LOGGER.info("Stopping vSphere event listener")
         self._stop_event.set()
+        # Interrupt a blocked WaitForUpdatesEx so the thread exits promptly;
+        # the loop breaks on _stop_event when the resulting exception arrives.
+        if self._pc is not None:
+            with contextlib.suppress(Exception):
+                self._pc.CancelWaitForUpdates()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=10)
         if self._pc_filter:
@@ -319,7 +324,10 @@ class VSphereEventListener:
                 if self._stop_event.is_set():
                     break
                 err_str = str(err).lower()
-                if "login" in err_str or "auth" in err_str or "credential" in err_str:
+                # NotAuthenticated is a session expiry, not bad credentials:
+                # reconnect with backoff instead of triggering reauth.
+                not_authenticated = type(err).__name__ == "NotAuthenticated" or "notauthenticated" in err_str
+                if not not_authenticated and ("login" in err_str or "auth" in err_str or "credential" in err_str):
                     _LOGGER.error("Auth error in event listener: %s", err)
                     self._hass.loop.call_soon_threadsafe(self._trigger_reauth)
                     break
@@ -406,7 +414,7 @@ class VSphereEventListener:
         if kind == "modify" and category in ("hosts", "vms"):
             self._check_and_fire_vsphere_events(category, moref, properties)
 
-        if kind == "enter":
+        if kind == "enter" and moref not in self._local_state_cache.get(category, {}):
             self._fire_event(
                 "vsphere_inventory_change",
                 {
@@ -529,13 +537,23 @@ class VSphereEventListener:
                 d["uptime_hours"] = round(val / 3600, 2)
         if "_max_cpu" in d:
             d["max_cpu_mhz"] = d.pop("_max_cpu")
-        if "_cpu_usage_raw" in d:
-            usage = d.pop("_cpu_usage_raw")
-            max_cpu = d.get("max_cpu_mhz") or stored.get("max_cpu_mhz")
-            if usage is not None and max_cpu:
-                d["cpu_use_pct"] = round((usage / max_cpu) * 100, 2)
+        if "_cpu_usage_raw" in d or "max_cpu_mhz" in d:
+            # Either input can arrive alone in a partial push; fall back to the
+            # stored value for whichever is absent. Raw usage is kept as
+            # cpu_usage_mhz (the initial fetch only has the derived pct, so
+            # back-compute from that when no raw value has been seen yet).
+            if "_cpu_usage_raw" in d:
+                usage = d.pop("_cpu_usage_raw")
+                if usage is None:
+                    usage = 0
             else:
-                d["cpu_use_pct"] = 0.0
+                usage = stored.get("cpu_usage_mhz")
+                if usage is None and stored.get("cpu_use_pct") is not None and stored.get("max_cpu_mhz"):
+                    usage = stored["cpu_use_pct"] * stored["max_cpu_mhz"] / 100
+            max_cpu = d.get("max_cpu_mhz") or stored.get("max_cpu_mhz")
+            if usage is not None:
+                d["cpu_usage_mhz"] = usage
+                d["cpu_use_pct"] = round((usage / max_cpu) * 100, 2) if max_cpu else 0.0
         if "_storage_raw" in d:
             val = d.pop("_storage_raw")
             if val:
@@ -848,12 +866,23 @@ class VSphereEventListener:
         )
         self._alarm_cache.clear()
         self._vm_power_cache.clear()
-        self._local_state_cache = {
-            "hosts": {},
-            "vms": {},
-            "datastores": {},
-            "clusters": {},
-            "resource_pools": {},
-        }
+        # _local_state_cache is deliberately NOT cleared: _do_initial_fetch replaces
+        # it wholesale, and keeping it lets the re-enter pushes after a reconnect
+        # skip duplicate "added" inventory events.
         self._alarm_name_cache.clear()
+        old_morefs = {cat: set(rows) for cat, rows in self._local_state_cache.items()}
         self._do_initial_fetch()
+        # Objects created/deleted during the outage never produce enter/leave pushes
+        for cat, old in old_morefs.items():
+            new_rows = self._local_state_cache.get(cat, {})
+            for action, morefs in (("added", set(new_rows) - old), ("removed", old - set(new_rows))):
+                for m in morefs:
+                    data = {
+                        "entry_id": self._entry_id,
+                        "action": action,
+                        "entity_type": cat.rstrip("s"),
+                        "entity_moref": m,
+                    }
+                    if action == "added":
+                        data["entity_name"] = new_rows[m].get("name", m)
+                    self._fire_event("vsphere_inventory_change", data)

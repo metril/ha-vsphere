@@ -35,7 +35,7 @@ for mod in [
 
 # config_flow.py defines `class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow,
 # domain=DOMAIN)` and `class VSphereOptionsFlow(_RestrictionFlowMixin,
-# OptionsFlowWithConfigEntry)`. Mixing a real class with a plain MagicMock *instance*
+# OptionsFlow)`. Mixing a real class with a plain MagicMock *instance*
 # as a base raises "metaclass conflict" (the instance's metaclass is MagicMock, which
 # isn't a subclass of `type`). These stand-ins are real classes so the module imports
 # cleanly; the flow classes themselves are not under test — only module-level helpers
@@ -51,4 +51,4 @@ class _StubOptionsFlow:
 
 
 ha_mock.ConfigFlow = _StubConfigFlow
-ha_mock.OptionsFlowWithConfigEntry = _StubOptionsFlow
+ha_mock.OptionsFlow = _StubOptionsFlow

@@ -48,6 +48,7 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"{DOMAIN}_{entry.entry_id}",
             update_interval=None,
         )
@@ -183,6 +184,7 @@ class VSpherePerfCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"{DOMAIN}_{entry.entry_id}_perf",
             update_interval=timedelta(seconds=interval),
         )
@@ -241,6 +243,7 @@ class VSphereInventoryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"{DOMAIN}_{entry.entry_id}_inventory",
             update_interval=timedelta(seconds=interval),
         )

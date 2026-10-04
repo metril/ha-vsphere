@@ -1,6 +1,6 @@
 [project]
 name = "ha-vsphere"
-version = "3.8.1"
+version = "3.9.0"
 description = "Home Assistant integration for VMware vSphere monitoring and control"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
@@ -18,7 +18,7 @@ dev = [
 # Home Assistant is needed only so mypy can resolve `homeassistant.*` imports.
 # Kept out of `dev` so lint/test runs don't pull in the whole HA dependency tree.
 typing = [
-    "homeassistant>=2024.6.0",
+    "homeassistant>=2024.12.0",
 ]
 
 [tool.ruff]
