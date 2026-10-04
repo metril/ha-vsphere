@@ -11,7 +11,7 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
-    OptionsFlowWithConfigEntry,
+    OptionsFlow,
 )
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
@@ -793,12 +793,11 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
 # ======================================================================
 
 
-class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlowWithConfigEntry):
+class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlow):
     """Hub-menu options flow for vSphere Control. Each menu option opens a sub-wizard."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize the options flow — load all current options upfront."""
-        super().__init__(config_entry)
         current = dict(config_entry.options)
         self._new_categories: dict[str, bool] = dict(current.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
         self._new_perf_interval: int = current.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)

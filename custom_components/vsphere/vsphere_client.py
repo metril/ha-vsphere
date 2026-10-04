@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import ssl
+import threading
 import time
 from typing import Any
 
@@ -60,6 +61,7 @@ class VSphereClient:
 
         self._push_conn: Any = None
         self._poll_conn: Any = None
+        self._poll_lock = threading.RLock()
         self._counter_cache: dict[str, int] | None = None
 
     # ------------------------------------------------------------------
@@ -126,7 +128,8 @@ class VSphereClient:
 
     def connect_poll(self) -> None:
         """Open the on-demand poll connection."""
-        self._poll_conn = self._connect()
+        with self._poll_lock:
+            self._poll_conn = self._connect()
 
     def disconnect_poll(self) -> None:
         """Close the on-demand poll connection."""
@@ -140,19 +143,20 @@ class VSphereClient:
 
     def ensure_poll_connection(self) -> None:
         """Reconnect the poll connection if the session has died."""
-        if self._poll_conn is None:
-            self.connect_poll()
-            return
+        with self._poll_lock:
+            if self._poll_conn is None:
+                self.connect_poll()
+                return
 
-        try:
-            # Accessing currentTime() is a cheap liveness probe
-            self._poll_conn.CurrentTime()
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("Poll connection lost; reconnecting", exc_info=True)
-            self._disconnect(self._poll_conn)
-            self._poll_conn = None
-            self._counter_cache = None
-            self.connect_poll()
+            try:
+                # Accessing currentTime() is a cheap liveness probe
+                self._poll_conn.CurrentTime()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Poll connection lost; reconnecting", exc_info=True)
+                self._disconnect(self._poll_conn)
+                self._poll_conn = None
+                self._counter_cache = None
+                self.connect_poll()
 
     # ------------------------------------------------------------------
     # Connectivity test

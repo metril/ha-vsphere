@@ -88,6 +88,30 @@ class TestVmPartialMerge:
 
         assert translated["cpu_use_pct"] == 25.0
 
+    def test_cpu_usage_none_in_delta_zeroes_pct(self):
+        listener = make_listener()
+        listener._local_state_cache["vms"]["vm-1"] = {"max_cpu_mhz": 2000, "cpu_use_pct": 25.0}
+
+        translated = listener._translate_properties("vms", {"summary.quickStats.overallCpuUsage": None}, "vm-1")
+
+        assert translated["cpu_use_pct"] == 0.0
+        assert translated["cpu_usage_mhz"] == 0
+
+    def test_cpu_usage_known_but_no_max_cpu_gives_zero_pct(self):
+        listener = make_listener()
+
+        translated = listener._translate_properties("vms", {"summary.quickStats.overallCpuUsage": 500}, "vm-1")
+
+        assert translated["cpu_use_pct"] == 0.0
+
+    def test_cpu_use_pct_recomputed_when_only_max_cpu_changes(self):
+        listener = make_listener()
+        listener._local_state_cache["vms"]["vm-1"] = {"max_cpu_mhz": 2000, "cpu_use_pct": 25.0}
+
+        translated = listener._translate_properties("vms", {"runtime.maxCpuUsage": 4000}, "vm-1")
+
+        assert translated["cpu_use_pct"] == 12.5
+
 
 # ---------------------------------------------------------------------------
 # Internal keys must never leak into the translated output

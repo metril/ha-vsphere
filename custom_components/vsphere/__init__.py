@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -149,7 +150,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         perf_coordinator = VSpherePerfCoordinator(hass, client, coordinator, entry)
         try:
             await perf_coordinator.async_config_entry_first_refresh()
-        except ConfigEntryNotReady:
+        except Exception:
             await hass.async_add_executor_job(event_listener.stop)
             await hass.async_add_executor_job(client.disconnect_poll)
             raise
@@ -182,21 +183,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "resolver": resolver,
     }
 
-    # ------------------------------------------------------------------
-    # Forward to platforms
-    # ------------------------------------------------------------------
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        # Forward to platforms
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # ------------------------------------------------------------------
-    # Clean up stale entities/devices from disabled categories or removed objects
-    # ------------------------------------------------------------------
-    _async_cleanup_stale_entities(hass, entry, coordinator, categories)
+        # Clean up stale entities/devices from disabled categories or removed objects
+        _async_cleanup_stale_entities(hass, entry, coordinator, categories)
 
-    # ------------------------------------------------------------------
-    # Register services (once, regardless of entry count)
-    # ------------------------------------------------------------------
-    if len(hass.data[DOMAIN]) == 1:
-        await async_register_services(hass)
+        # Register services (once, regardless of entry count)
+        if len(hass.data[DOMAIN]) == 1:
+            await async_register_services(hass)
+    except Exception:
+        with contextlib.suppress(Exception):
+            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        domain_data = hass.data.get(DOMAIN)
+        if domain_data is not None:
+            domain_data.pop(entry.entry_id, None)
+            if not domain_data:
+                hass.data.pop(DOMAIN, None)
+        await hass.async_add_executor_job(event_listener.stop)
+        if perf_coordinator is not None:
+            await perf_coordinator.async_shutdown()
+        if inventory_coordinator is not None:
+            await inventory_coordinator.async_shutdown()
+        await hass.async_add_executor_job(client.disconnect_poll)
+        raise
 
     # ------------------------------------------------------------------
     # Listen for options changes so we can reload
@@ -268,6 +279,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Unload platforms first to stop entity callbacks before tearing down data sources
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unload_ok:
+        return False
 
     # Stop the event listener
     if event_listener is not None:

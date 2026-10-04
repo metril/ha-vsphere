@@ -1,22 +1,22 @@
 # ha-vsphere
 
 Home Assistant custom integration for VMware vSphere monitoring and control.
-**Version:** 3.8.1 | **Domain:** `vsphere` | **IoT Class:** `local_push`
+**Version:** 3.9.0 | **Domain:** `vsphere` | **IoT Class:** `local_push`
 
 ## Project Structure
 
 ```
 custom_components/vsphere/
-├── __init__.py          (301)  Entry setup/teardown, coordinator wiring, entity cleanup
+├── __init__.py          (314)  Entry setup/teardown, coordinator wiring, entity cleanup
 ├── const.py             (152)  Constants, enums, derive_vm_state()
 ├── exceptions.py         (19)  VSphereError hierarchy
 ├── permissions.py       (186)  7-step resolution chain (user restrictions only)
-├── vsphere_client.py  (1,743)  ALL pyVmomi interaction (only file importing pyVmomi)
-├── coordinator.py       (272)  VSphereData (push) + Perf + Inventory coordinators
-├── event_listener.py    (859)  PropertyCollector push thread + translation maps + shadow cache
+├── vsphere_client.py  (1,747)  ALL pyVmomi interaction (only file importing pyVmomi)
+├── coordinator.py       (275)  VSphereData (push) + Perf + Inventory coordinators
+├── event_listener.py    (888)  PropertyCollector push thread + translation maps + shadow cache
 ├── entity.py            (209)  Base entity + child entity + device hierarchy + is_vm_disconnected()
-├── config_flow.py       (997)  Menu-driven options + config + reauth + reconfigure + restriction mixin
-├── sensor.py          (1,019)  Sensor descriptions with conditional skip (perf, storage)
+├── config_flow.py       (996)  Menu-driven options + config + reauth + reconfigure + restriction mixin
+├── sensor.py          (1,020)  Sensor descriptions with conditional skip (perf, storage)
 ├── binary_sensor.py     (352)  Binary sensor descriptions
 ├── switch.py            (105)  Host maintenance mode switch
 ├── button.py            (325)  Button classes with snapshot select integration
@@ -30,8 +30,8 @@ custom_components/vsphere/
 ```
 
 - `docs/superpowers/` — Design specs and plans (local only, gitignored)
-- `.github/workflows/` — `validate` (hassfest + HACS), `ci` (ruff + pytest, mypy advisory), `release`
-- `tests/` — 106 unit tests. Pure-unit only: `conftest.py` mocks every `homeassistant.*`
+- `.github/workflows/` — `validate` (hassfest + HACS), `ci` (ruff + pytest, mypy advisory), `release` (automatic on merge to main when the manifest version is new: tags `v<version>` + GitHub release)
+- `tests/` — 112 unit tests. Pure-unit only: `conftest.py` mocks every `homeassistant.*`
   module, so classes subclassing `CoordinatorEntity`/`DataUpdateCoordinator` resolve to
   non-functional mocks and **cannot be tested**. Keep branching logic in module-level
   functions (`derive_vm_state`, `is_vm_disconnected`, `_duration_to_seconds`) so it stays testable.
@@ -129,4 +129,4 @@ The resolver handles only user-configured restrictions:
 ## Dependencies
 
 - `pyvmomi>=8.0.3` — VMware vSphere API SDK
-- Home Assistant Core 2024.6.0+
+- Home Assistant Core 2024.12.0+

@@ -434,7 +434,9 @@
             "unknown": "An unexpected error occurred"
         },
         "abort": {
-            "already_configured": "This vSphere host is already configured"
+            "already_configured": "This vSphere host is already configured",
+            "reauth_successful": "Re-authentication was successful",
+            "reconfigure_successful": "Reconfiguration was successful"
         }
     },
     "options": {

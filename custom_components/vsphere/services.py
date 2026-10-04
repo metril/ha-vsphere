@@ -55,14 +55,14 @@ _VM_POWER_ACTIONS = [
 
 _SCHEMA_VM_POWER = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_ACTION): vol.In(_VM_POWER_ACTIONS),
     }
 )
 
 _SCHEMA_HOST_POWER = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_ACTION): vol.In([HostAction.SHUTDOWN.value, HostAction.REBOOT.value]),
         vol.Optional(ATTR_FORCE, default=False): bool,
     }
@@ -70,21 +70,21 @@ _SCHEMA_HOST_POWER = vol.Schema(
 
 _SCHEMA_HOST_POWER_POLICY = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_POLICY): str,
     }
 )
 
 _SCHEMA_HOST_MAINTENANCE_MODE = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_ENABLE): bool,
     }
 )
 
 _SCHEMA_CREATE_SNAPSHOT = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Optional(ATTR_NAME): str,
         vol.Optional(ATTR_DESCRIPTION): str,
         vol.Optional(ATTR_MEMORY, default=False): bool,
@@ -94,26 +94,26 @@ _SCHEMA_CREATE_SNAPSHOT = vol.Schema(
 
 _SCHEMA_REMOVE_SNAPSHOT = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_WHICH): vol.In([SNAP_ALL, SNAP_FIRST, SNAP_LAST]),
     }
 )
 
 _SCHEMA_LIST_HOSTS = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
     }
 )
 
 _SCHEMA_LIST_POWER_POLICIES = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
     }
 )
 
 _SCHEMA_VM_MIGRATE = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required("target_host"): str,
     }
 )
@@ -122,7 +122,7 @@ ATTR_SNAPSHOTS = "snapshots"
 
 _SCHEMA_REMOVE_SNAPSHOTS = vol.Schema(
     {
-        vol.Required(ATTR_DEVICE_ID): str,
+        vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_SNAPSHOTS): vol.All(cv.ensure_list, [str]),
     }
 )
@@ -362,7 +362,7 @@ async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> No
                 await hass.async_add_executor_job(client.remove_snapshot, vm_moref, SNAP_ALL)
             except (VSphereOperationError, VSphereConnectionError) as err:
                 raise HomeAssistantError(str(err)) from err
-            return  # "all" removes everything, no need to continue
+            break  # "all" removed everything; later names would no longer exist
 
         matches = [s for s in snapshots if s["name"] == snap_name]
         if not matches:
