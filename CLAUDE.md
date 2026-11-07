@@ -71,9 +71,7 @@ uv run mypy custom_components/vsphere/   # advisory: 22 pre-existing errors
   drops. `is_vm_disconnected()` also cascades to the parent host and is evaluated at read time, because
   a host row changing does not recompute the VM rows pointing at it.
 - **ContainerView cleanup:** tracked and destroyed on stop/reconnect
-- **Git identity:** author `metril <1517921+metril@users.noreply.github.com>`
 - **Never commit `docs/`** — specs and plans are local working files
-- **Never mention AI/Claude** in commits or code
 
 ## Architecture
 
