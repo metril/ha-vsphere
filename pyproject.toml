@@ -1,8 +1,8 @@
 [project]
 name = "ha-vsphere"
-version = "3.9.0"
+version = "3.10.0"
 description = "Home Assistant integration for VMware vSphere monitoring and control"
-requires-python = ">=3.12"
+requires-python = ">=3.14.2"
 license = { file = "LICENSE" }
 dependencies = [
     "pyvmomi>=8.0.3",
@@ -14,24 +14,23 @@ dev = [
     "mypy>=1.10.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-xdist>=3.6.0",
 ]
 # Home Assistant is needed only so mypy can resolve `homeassistant.*` imports.
 # Kept out of `dev` so lint/test runs don't pull in the whole HA dependency tree.
 typing = [
-    "homeassistant>=2024.12.0",
+    "homeassistant>=2026.3.0",
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "TCH"]
 
 [tool.mypy]
-# No pinned python_version: the resolved Home Assistant release differs per
-# interpreter (2024.12.x on 3.12, 2026.x on 3.13), and pinning below the
-# running interpreter makes mypy reject HA's own newer syntax.
+python_version = "3.14"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -39,3 +38,6 @@ disallow_untyped_defs = true
 [[tool.mypy.overrides]]
 module = ["pyVim.*", "pyVmomi.*", "voluptuous.*"]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-n auto"

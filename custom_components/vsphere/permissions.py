@@ -158,18 +158,22 @@ class PermissionResolver:
         # ------------------------------------------------------------------
         # Step 6: global shortcut groups
         # ------------------------------------------------------------------
+        matched_allowed: str | None = None
         for group_name, (cat_filter, action_set) in _SHORTCUT_GROUPS.items():
-            # Skip this group if it is scoped to a specific category that
-            # doesn't match the current category.
+            # Skip groups scoped to a different category or not covering the action.
             if cat_filter is not None and cat_filter != category:
                 continue
             if action not in action_set:
                 continue
             value = global_rules.get(group_name, _UNSET)
-            if value is not _UNSET:
-                blocked = bool(value)
-                state = "blocked" if blocked else "allowed"
-                return blocked, (f"{state} by global shortcut group '{group_name}' (action={action})")
+            if value is _UNSET:
+                continue
+            if bool(value):
+                # Any matching group that blocks wins.
+                return True, f"blocked by global shortcut group '{group_name}' (action={action})"
+            matched_allowed = group_name
+        if matched_allowed is not None:
+            return False, f"allowed by global shortcut group '{matched_allowed}' (action={action})"
 
         # ------------------------------------------------------------------
         # Step 7: global nuclear switch (_all)

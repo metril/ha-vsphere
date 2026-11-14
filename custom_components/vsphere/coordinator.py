@@ -87,6 +87,19 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         self.async_set_updated_data(self._data)
 
     @callback
+    def async_update_from_push_batch(self, updates: list[tuple[str, str, dict[str, Any]]]) -> None:
+        """Merge many pushed (category, moref, properties) updates, notifying once."""
+        for category, moref, properties in updates:
+            if category not in self._data:
+                continue
+            if moref in self._data[category]:
+                self._data[category][moref].update(properties)
+            else:
+                properties["moref"] = moref
+                self._data[category][moref] = properties
+        self.async_set_updated_data(self._data)
+
+    @callback
     def adjust_host_vm_count(self, host_moref: str, delta: int) -> None:
         """Adjust a host's running VM count by a delta (+1 or -1).
 
@@ -158,7 +171,9 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         for key in ("licenses", "networks", "storage_advanced"):
             if key in data:
                 self._data[key] = data[key]
-        self.async_set_updated_data(self._data)
+        # async_update_listeners (not async_set_updated_data): the latter resets
+        # last_update_success to True and would mask a lost push connection.
+        self.async_update_listeners()
 
     def update_perf(self, perf_data: dict[str, Any]) -> None:
         """Update performance counter data."""

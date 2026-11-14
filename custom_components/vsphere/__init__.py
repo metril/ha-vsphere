@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import Platform
@@ -54,11 +55,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Validate CA file if configured
     # ------------------------------------------------------------------
     ssl_ca_path = entry.data.get(CONF_SSL_CA_PATH, "")
-    if ssl_ca_path:
-        from pathlib import Path  # noqa: PLC0415
-
-        if not Path(ssl_ca_path).is_file():
-            raise ConfigEntryNotReady(f"CA certificate file not found: {ssl_ca_path}")
+    if ssl_ca_path and not await hass.async_add_executor_job(Path(ssl_ca_path).is_file):
+        raise ConfigEntryNotReady(f"CA certificate file not found: {ssl_ca_path}")
 
     # ------------------------------------------------------------------
     # Create the client and test connectivity
@@ -106,115 +104,129 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, dict(DEFAULT_CATEGORIES))
     entity_filter: dict[str, Any] = entry.options.get(CONF_ENTITY_FILTER, {})
 
-    # ------------------------------------------------------------------
-    # Create and start the event listener
-    # ------------------------------------------------------------------
-    event_listener = VSphereEventListener(
-        hass=hass,
-        client=client,
-        vsphere_data=coordinator,
-        entry_id=entry.entry_id,
-        categories=categories,
-        entity_filter=entity_filter,
-    )
-
-    try:
-        await hass.async_add_executor_job(event_listener.start)
-    except VSphereAuthError as err:
-        await hass.async_add_executor_job(event_listener.stop)
-        await hass.async_add_executor_job(client.disconnect_poll)
-        raise ConfigEntryAuthFailed(str(err)) from err
-    except VSphereConnectionError as err:
-        await hass.async_add_executor_job(event_listener.stop)
-        await hass.async_add_executor_job(client.disconnect_poll)
-        raise ConfigEntryNotReady(str(err)) from err
-    except Exception as err:
-        await hass.async_add_executor_job(event_listener.stop)
-        await hass.async_add_executor_job(client.disconnect_poll)
-        raise ConfigEntryNotReady(f"Unexpected error starting vSphere listener: {err}") from err
-
-    # Wait for initial data before setting up platforms (event listener
-    # pushes data from a background thread via call_soon_threadsafe)
-    try:
-        await asyncio.wait_for(coordinator.initial_data_ready.wait(), timeout=30)
-    except TimeoutError as err:
-        await hass.async_add_executor_job(event_listener.stop)
-        await hass.async_add_executor_job(client.disconnect_poll)
-        raise ConfigEntryNotReady("Timed out waiting for initial vSphere data") from err
-
-    # ------------------------------------------------------------------
-    # Optionally create the performance coordinator
-    # ------------------------------------------------------------------
+    # Everything from here on can fail; tear down whatever was started so no
+    # listener thread or poll session leaks, whatever the exception type.
+    event_listener: VSphereEventListener | None = None
     perf_coordinator: VSpherePerfCoordinator | None = None
-    if categories.get(Category.PERFORMANCE, False):
-        perf_coordinator = VSpherePerfCoordinator(hass, client, coordinator, entry)
-        try:
-            await perf_coordinator.async_config_entry_first_refresh()
-        except Exception:
-            await hass.async_add_executor_job(event_listener.stop)
-            await hass.async_add_executor_job(client.disconnect_poll)
-            raise
-        # Registering a listener is what arms the perf coordinator's own refresh
-        # timer — HA only reschedules while a coordinator has listeners.
-        entry.async_on_unload(perf_coordinator.async_add_listener(coordinator.async_update_listeners))
-
-    # ------------------------------------------------------------------
-    # Optionally create the inventory coordinator (licenses/network/storage_advanced —
-    # categories PropertyCollector cannot watch)
-    # ------------------------------------------------------------------
     inventory_coordinator: VSphereInventoryCoordinator | None = None
-    if any(categories.get(c) for c in (Category.LICENSES, Category.NETWORK, Category.STORAGE_ADVANCED)):
-        inventory_coordinator = VSphereInventoryCoordinator(hass, client, coordinator, entry, categories)
-        # Registering a listener arms the refresh timer — HA only reschedules
-        # a coordinator while it has listeners. No first refresh: the event
-        # listener's initial fetch already populated these categories.
-        entry.async_on_unload(inventory_coordinator.async_add_listener(coordinator.async_update_listeners))
-
-    # ------------------------------------------------------------------
-    # Store runtime objects in hass.data
-    # ------------------------------------------------------------------
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        "client": client,
-        "coordinator": coordinator,
-        "event_listener": event_listener,
-        "perf_coordinator": perf_coordinator,
-        "inventory_coordinator": inventory_coordinator,
-        "resolver": resolver,
-    }
-
     try:
+        # ------------------------------------------------------------------
+        # Create and start the event listener
+        # ------------------------------------------------------------------
+        event_listener = VSphereEventListener(
+            hass=hass,
+            client=client,
+            vsphere_data=coordinator,
+            entry_id=entry.entry_id,
+            categories=categories,
+            entity_filter=entity_filter,
+        )
+
+        try:
+            await hass.async_add_executor_job(event_listener.start)
+        except VSphereAuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except VSphereConnectionError as err:
+            raise ConfigEntryNotReady(str(err)) from err
+        except Exception as err:
+            raise ConfigEntryNotReady(f"Unexpected error starting vSphere listener: {err}") from err
+
+        # Wait for initial data before setting up platforms (event listener
+        # pushes data from a background thread via call_soon_threadsafe)
+        try:
+            await asyncio.wait_for(coordinator.initial_data_ready.wait(), timeout=30)
+        except TimeoutError as err:
+            raise ConfigEntryNotReady("Timed out waiting for initial vSphere data") from err
+
+        # ------------------------------------------------------------------
+        # Optionally create the performance coordinator
+        # ------------------------------------------------------------------
+        if categories.get(Category.PERFORMANCE, False):
+            perf_coordinator = VSpherePerfCoordinator(hass, client, coordinator, entry)
+            await perf_coordinator.async_config_entry_first_refresh()
+            # Registering a listener is what arms the perf coordinator's own refresh
+            # timer — HA only reschedules while a coordinator has listeners.
+            entry.async_on_unload(perf_coordinator.async_add_listener(coordinator.async_update_listeners))
+
+        # ------------------------------------------------------------------
+        # Optionally create the inventory coordinator (licenses/network/storage_advanced —
+        # categories PropertyCollector cannot watch)
+        # ------------------------------------------------------------------
+        if any(categories.get(c) for c in (Category.LICENSES, Category.NETWORK, Category.STORAGE_ADVANCED)):
+            inventory_coordinator = VSphereInventoryCoordinator(hass, client, coordinator, entry, categories)
+            # Registering a listener arms the refresh timer — HA only reschedules
+            # a coordinator while it has listeners. No first refresh: the event
+            # listener's initial fetch already populated these categories.
+            entry.async_on_unload(inventory_coordinator.async_add_listener(coordinator.async_update_listeners))
+
+        # ------------------------------------------------------------------
+        # Store runtime objects in hass.data
+        # ------------------------------------------------------------------
+        hass.data.setdefault(DOMAIN, {})
+        hass.data[DOMAIN][entry.entry_id] = {
+            "client": client,
+            "coordinator": coordinator,
+            "event_listener": event_listener,
+            "perf_coordinator": perf_coordinator,
+            "inventory_coordinator": inventory_coordinator,
+            "resolver": resolver,
+        }
+
+        # ------------------------------------------------------------------
         # Forward to platforms
+        # ------------------------------------------------------------------
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+        # ------------------------------------------------------------------
         # Clean up stale entities/devices from disabled categories or removed objects
+        # ------------------------------------------------------------------
         _async_cleanup_stale_entities(hass, entry, coordinator, categories)
 
+        # ------------------------------------------------------------------
         # Register services (once, regardless of entry count)
+        # ------------------------------------------------------------------
         if len(hass.data[DOMAIN]) == 1:
             await async_register_services(hass)
-    except Exception:
-        with contextlib.suppress(Exception):
-            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-        domain_data = hass.data.get(DOMAIN)
-        if domain_data is not None:
-            domain_data.pop(entry.entry_id, None)
-            if not domain_data:
-                hass.data.pop(DOMAIN, None)
-        await hass.async_add_executor_job(event_listener.stop)
-        if perf_coordinator is not None:
-            await perf_coordinator.async_shutdown()
-        if inventory_coordinator is not None:
-            await inventory_coordinator.async_shutdown()
-        await hass.async_add_executor_job(client.disconnect_poll)
+
+        # ------------------------------------------------------------------
+        # Listen for options changes so we can reload
+        # ------------------------------------------------------------------
+        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    except BaseException:
+        await _async_teardown(hass, entry, event_listener, perf_coordinator, inventory_coordinator, client)
         raise
 
-    # ------------------------------------------------------------------
-    # Listen for options changes so we can reload
-    # ------------------------------------------------------------------
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-
     return True
+
+
+async def _async_teardown(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    event_listener: VSphereEventListener | None,
+    perf_coordinator: VSpherePerfCoordinator | None,
+    inventory_coordinator: VSphereInventoryCoordinator | None,
+    client: VSphereClient,
+) -> None:
+    """Best-effort cleanup after a failed setup."""
+    with contextlib.suppress(Exception):
+        await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if event_listener is not None:
+        with contextlib.suppress(Exception):
+            await hass.async_add_executor_job(event_listener.stop)
+    if perf_coordinator is not None:
+        with contextlib.suppress(Exception):
+            await perf_coordinator.async_shutdown()
+    if inventory_coordinator is not None:
+        with contextlib.suppress(Exception):
+            await inventory_coordinator.async_shutdown()
+    with contextlib.suppress(Exception):
+        await hass.async_add_executor_job(client.disconnect_poll)
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is not None:
+        domain_data.pop(entry.entry_id, None)
+        if not domain_data:
+            hass.data.pop(DOMAIN, None)
 
 
 def _async_cleanup_stale_entities(
@@ -280,6 +292,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Unload platforms first to stop entity callbacks before tearing down data sources
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not unload_ok:
+        # Platforms still hold references; keep the listener, coordinators and client alive
         return False
 
     # Stop the event listener
