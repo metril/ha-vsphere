@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from homeassistant.components.binary_sensor import (
@@ -12,17 +13,18 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.const import EntityCategory
 
-from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, Category
-from .entity import VSphereChildEntity, VSphereEntity
+from .const import CONF_CATEGORIES, CONF_ENTITY_FILTER, DEFAULT_CATEGORIES, Category
+from .entity import VSphereChildEntity, VSphereEntity, async_setup_discovery, iter_rows
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity import Entity
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-    from .coordinator import VSphereData
+    from .coordinator import VSphereConfigEntry, VSphereData
+    from .entity import Spec
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -154,111 +156,126 @@ BINARY_SENSOR_MAP: dict[str, tuple[tuple[VSphereBinarySensorDescription, ...], s
 }
 
 
+_NET_BINARY_MAP: dict[str, tuple[VSphereBinarySensorDescription, ...]] = {
+    "pnic": PNIC_BINARY_SENSORS,
+    "dvswitch": DVSWITCH_BINARY_SENSORS,
+}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: VSphereConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up vSphere binary sensors from a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: VSphereData = data["coordinator"]
+    coordinator = entry.runtime_data.coordinator
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
+    entity_filter: dict[str, Any] = entry.options.get(CONF_ENTITY_FILTER, {})
 
-    entities: list[VSphereBinarySensor | VSphereAlarmBinarySensor] = []
+    def specs() -> Iterator[Spec]:
+        yield from _binary_sensor_specs(entry, coordinator, categories, entity_filter)
+
+    async_setup_discovery(entry, coordinator, async_add_entities, specs)
+
+
+def _binary_sensor_specs(
+    entry: VSphereConfigEntry,
+    coordinator: VSphereData,
+    categories: dict[str, bool],
+    entity_filter: dict[str, Any],
+) -> Iterator[Spec]:
+    """Yield (key, factory) for every binary sensor group that should exist right now."""
+    data: dict[str, Any] = coordinator.data or {}
 
     for category, (descriptions, data_key) in BINARY_SENSOR_MAP.items():
-        if not categories.get(category):
-            continue
-        for moref, obj_data in coordinator.data.get(data_key, {}).items():
-            name: str = obj_data.get("name", moref)
-            for description in descriptions:
-                entities.append(
-                    VSphereBinarySensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        object_type=data_key,
-                        moref=moref,
-                        name=name,
-                        description=description,
-                    )
-                )
+        for moref, row in iter_rows(data, categories, entity_filter, category, data_key):
+            yield (
+                (category, moref),
+                partial(_build_object, coordinator, entry, data_key, moref, row, descriptions, VSphereBinarySensor),
+            )
 
     # Network binary sensors
-    if categories.get("network"):
-        hosts_data = coordinator.data.get("hosts", {})
-        _net_binary_map: dict[str, tuple[VSphereBinarySensorDescription, ...]] = {
-            "pnic": PNIC_BINARY_SENSORS,
-            "dvswitch": DVSWITCH_BINARY_SENSORS,
-        }
-        for net_moref, obj_data in coordinator.data.get("networks", {}).items():
-            net_type = obj_data.get("type", "")
-            type_descriptions = _net_binary_map.get(net_type, ())
-            if not type_descriptions:
-                continue
-            name = obj_data.get("name", net_moref)
-            host_moref = obj_data.get("host_moref", "")
-            if host_moref:
-                host_name = hosts_data.get(host_moref, {}).get("name", host_moref)
-                for description in type_descriptions:
-                    entities.append(
-                        VSphereChildBinarySensor(
-                            coordinator=coordinator,
-                            entry=entry,
-                            parent_object_type="hosts",
-                            parent_moref=host_moref,
-                            parent_name=host_name,
-                            data_category="networks",
-                            data_moref=net_moref,
-                            description=description,
-                            entity_name=name,
-                        )
-                    )
-            else:
-                for description in type_descriptions:
-                    entities.append(
-                        VSphereChildBinarySensor(
-                            coordinator=coordinator,
-                            entry=entry,
-                            parent_object_type="root",
-                            parent_moref=entry.entry_id,
-                            parent_name=entry.title,
-                            data_category="networks",
-                            data_moref=net_moref,
-                            description=description,
-                            entity_name=name,
-                        )
-                    )
+    for net_moref, net_row in iter_rows(data, categories, entity_filter, "network", "networks"):
+        descriptions = _NET_BINARY_MAP.get(net_row.get("type", ""), ())
+        if not descriptions:
+            continue
+        host_moref = net_row.get("host_moref", "")
+        if host_moref:
+            host_name = data.get("hosts", {}).get(host_moref, {}).get("name", host_moref)
+            parent = ("hosts", host_moref, host_name)
+        else:
+            parent = ("root", entry.entry_id, entry.title)
+        yield (
+            ("networks", net_moref),
+            partial(
+                _build_child,
+                coordinator,
+                entry,
+                *parent,
+                net_moref,
+                descriptions,
+                net_row.get("name", net_moref),
+            ),
+        )
 
-    # Alarm status binary sensors — created for each host/VM when events_alarms is enabled
-    if categories.get(Category.EVENTS_ALARMS):
-        for moref, obj_data in coordinator.data.get("hosts", {}).items():
-            name = obj_data.get("name", moref)
-            for desc in ALARM_BINARY_SENSORS:
-                entities.append(
-                    VSphereAlarmBinarySensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        object_type="hosts",
-                        moref=moref,
-                        name=name,
-                        description=desc,
-                    )
-                )
-        for moref, obj_data in coordinator.data.get("vms", {}).items():
-            name = obj_data.get("name", moref)
-            for desc in ALARM_BINARY_SENSORS:
-                entities.append(
-                    VSphereAlarmBinarySensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        object_type="vms",
-                        moref=moref,
-                        name=name,
-                        description=desc,
-                    )
-                )
+    # Alarm status binary sensors — one set per host/VM when events_alarms is enabled
+    for data_key in ("hosts", "vms"):
+        for moref, row in iter_rows(data, categories, entity_filter, Category.EVENTS_ALARMS, data_key):
+            yield (
+                (f"alarm_{data_key}", moref),
+                partial(
+                    _build_object,
+                    coordinator,
+                    entry,
+                    data_key,
+                    moref,
+                    row,
+                    ALARM_BINARY_SENSORS,
+                    VSphereAlarmBinarySensor,
+                ),
+            )
 
-    async_add_entities(entities)
+
+def _build_object(
+    coordinator: VSphereData,
+    entry: VSphereConfigEntry,
+    object_type: str,
+    moref: str,
+    row: dict[str, Any],
+    descriptions: tuple[VSphereBinarySensorDescription, ...],
+    cls: type[VSphereBinarySensor] | type[VSphereAlarmBinarySensor],
+) -> list[Entity]:
+    name: str = row.get("name", moref)
+    return [
+        cls(coordinator=coordinator, entry=entry, object_type=object_type, moref=moref, name=name, description=d)
+        for d in descriptions
+    ]
+
+
+def _build_child(
+    coordinator: VSphereData,
+    entry: VSphereConfigEntry,
+    parent_object_type: str,
+    parent_moref: str,
+    parent_name: str,
+    data_moref: str,
+    descriptions: tuple[VSphereBinarySensorDescription, ...],
+    entity_name: str,
+) -> list[Entity]:
+    return [
+        VSphereChildBinarySensor(
+            coordinator=coordinator,
+            entry=entry,
+            parent_object_type=parent_object_type,
+            parent_moref=parent_moref,
+            parent_name=parent_name,
+            data_category="networks",
+            data_moref=data_moref,
+            description=d,
+            entity_name=entity_name,
+        )
+        for d in descriptions
+    ]
 
 
 class VSphereBinarySensor(VSphereEntity, BinarySensorEntity):
@@ -269,7 +286,7 @@ class VSphereBinarySensor(VSphereEntity, BinarySensorEntity):
     def __init__(
         self,
         coordinator: VSphereData,
-        entry: ConfigEntry,
+        entry: VSphereConfigEntry,
         object_type: str,
         moref: str,
         name: str,
@@ -300,7 +317,7 @@ class VSphereChildBinarySensor(VSphereChildEntity, BinarySensorEntity):
     def __init__(
         self,
         coordinator: VSphereData,
-        entry: ConfigEntry,
+        entry: VSphereConfigEntry,
         parent_object_type: str,
         parent_moref: str,
         parent_name: str,
@@ -332,7 +349,7 @@ class VSphereAlarmBinarySensor(VSphereEntity, BinarySensorEntity):
     def __init__(
         self,
         coordinator: VSphereData,
-        entry: ConfigEntry,
+        entry: VSphereConfigEntry,
         object_type: str,
         moref: str,
         name: str,

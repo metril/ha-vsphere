@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import (
@@ -20,17 +21,18 @@ from homeassistant.const import (
     UnitOfTime,
 )
 
-from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, Category
-from .entity import VSphereChildEntity, VSphereEntity
+from .const import CONF_CATEGORIES, CONF_ENTITY_FILTER, DEFAULT_CATEGORIES, Category
+from .entity import VSphereChildEntity, VSphereEntity, async_setup_discovery, iter_rows
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity import Entity
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-    from .coordinator import VSphereData, VSpherePerfCoordinator
+    from .coordinator import VSphereConfigEntry, VSphereData, VSpherePerfCoordinator, VSphereRuntimeData
+    from .entity import Spec
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -701,189 +703,226 @@ SENSOR_MAP: dict[str, tuple[tuple[VSphereSensorDescription, ...], str]] = {
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: VSphereConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up vSphere sensors from a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: VSphereData = data["coordinator"]
-    perf_coordinator: VSpherePerfCoordinator | None = data.get("perf_coordinator")
+    rt = entry.runtime_data
+    coordinator = rt.coordinator
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
-
-    entities: list[VSphereSensor | VSpherePerfSensor | VSphereAlarmSensor] = []
+    entity_filter: dict[str, Any] = entry.options.get(CONF_ENTITY_FILTER, {})
 
     # Skip static sensors that are superseded by more detailed alternatives.
     # - Performance enabled: realtime perf sensors replace static CPU/memory usage
     # - Storage Advanced enabled: Committed/Uncommitted/Unshared replace Used Space
-    perf_enabled = bool(categories.get("performance"))
-    storage_advanced = bool(categories.get("storage_advanced"))
-    _skip: dict[str, set[str]] = {}
-    if perf_enabled:
-        _skip.setdefault("hosts", set()).update({"cpu_usage_ghz", "mem_usage_gb"})
-        _skip.setdefault("vms", set()).update({"cpu_use_pct", "memory_active_mb"})
-    if storage_advanced:
-        _skip.setdefault("vms", set()).add("used_space_gb")
+    skip: dict[str, set[str]] = {}
+    if categories.get("performance"):
+        skip.setdefault("hosts", set()).update({"cpu_usage_ghz", "mem_usage_gb"})
+        skip.setdefault("vms", set()).update({"cpu_use_pct", "memory_active_mb"})
+    if categories.get("storage_advanced"):
+        skip.setdefault("vms", set()).add("used_space_gb")
+
+    def specs() -> Iterator[Spec]:
+        yield from _sensor_specs(entry, rt, categories, entity_filter, skip)
+
+    async_setup_discovery(entry, coordinator, async_add_entities, specs)
+
+
+def _sensor_specs(
+    entry: VSphereConfigEntry,
+    rt: VSphereRuntimeData,
+    categories: dict[str, bool],
+    entity_filter: dict[str, Any],
+    skip: dict[str, set[str]],
+) -> Iterator[Spec]:
+    """Yield (key, factory) for every sensor group that should exist right now."""
+    coordinator = rt.coordinator
+    perf_coordinator = rt.perf_coordinator
+    data: dict[str, Any] = coordinator.data or {}
 
     for category, (descriptions, data_key) in SENSOR_MAP.items():
-        if not categories.get(category):
-            continue
-        skip_keys = _skip.get(category, set())
-        for moref, obj_data in coordinator.data.get(data_key, {}).items():
-            name: str = obj_data.get("name", moref)
-            for description in descriptions:
-                if description.key in skip_keys:
-                    continue
-                entities.append(
-                    VSphereSensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        object_type=data_key,
-                        moref=moref,
-                        name=name,
-                        description=description,
-                    )
-                )
+        skip_keys = skip.get(category, set())
+        for moref, row in iter_rows(data, categories, entity_filter, category, data_key):
+            yield (
+                (category, moref),
+                partial(_build_object_sensors, coordinator, entry, data_key, moref, row, descriptions, skip_keys),
+            )
 
     # License sensors: attach to root device, read from "licenses" data
-    if categories.get("licenses"):
-        for lic_key, lic_data in coordinator.data.get("licenses", {}).items():
-            name = lic_data.get("name", lic_key)
-            for description in LICENSE_SENSORS:
-                entities.append(
-                    VSphereChildSensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        parent_object_type="root",
-                        parent_moref=entry.entry_id,
-                        parent_name=entry.title,
-                        data_category="licenses",
-                        data_moref=lic_key,
-                        description=description,
-                        entity_name=name,
-                    )
-                )
+    for lic_key, lic_row in iter_rows(data, categories, entity_filter, "licenses"):
+        yield (
+            ("licenses", lic_key),
+            partial(
+                _build_child_sensors,
+                coordinator,
+                entry,
+                "root",
+                entry.entry_id,
+                entry.title,
+                "licenses",
+                lic_key,
+                LICENSE_SENSORS,
+                lic_row.get("name", lic_key),
+            ),
+        )
 
-    # Network sensors: attach to parent Host device, read from "networks" data
-    # dvSwitch/dvPortgroup entities attach to root vCenter device (datacenter-level)
-    if categories.get("network"):
-        _network_type_map: dict[str, tuple[VSphereSensorDescription, ...]] = {
-            "vswitch": VSWITCH_SENSORS,
-            "pnic": PNIC_SENSORS,
-            "portgroup": PORTGROUP_SENSORS,
-            "dvswitch": DVSWITCH_SENSORS,
-            "dvportgroup": DVPORTGROUP_SENSORS,
-        }
-        hosts_data = coordinator.data.get("hosts", {})
-        for net_moref, obj_data in coordinator.data.get("networks", {}).items():
-            net_type = obj_data.get("type", "")
-            type_descriptions = _network_type_map.get(net_type, ())
-            name = obj_data.get("name", net_moref)
-            host_moref = obj_data.get("host_moref", "")
-
-            if host_moref:
-                # Standard vSwitch/pNIC/portgroup — child of host device
-                host_name = hosts_data.get(host_moref, {}).get("name", host_moref)
-                for description in type_descriptions:
-                    entities.append(
-                        VSphereChildSensor(
-                            coordinator=coordinator,
-                            entry=entry,
-                            parent_object_type="hosts",
-                            parent_moref=host_moref,
-                            parent_name=host_name,
-                            data_category="networks",
-                            data_moref=net_moref,
-                            description=description,
-                            entity_name=name,
-                        )
-                    )
-            else:
-                # dvSwitch/dvPortgroup — child of root vCenter device
-                for description in type_descriptions:
-                    entities.append(
-                        VSphereChildSensor(
-                            coordinator=coordinator,
-                            entry=entry,
-                            parent_object_type="root",
-                            parent_moref=entry.entry_id,
-                            parent_name=entry.title,
-                            data_category="networks",
-                            data_moref=net_moref,
-                            description=description,
-                            entity_name=name,
-                        )
-                    )
+    # Network sensors: attach to parent Host device (dvSwitch/dvPortgroup: root vCenter device)
+    for net_moref, net_row in iter_rows(data, categories, entity_filter, "network", "networks"):
+        descriptions = _NETWORK_TYPE_MAP.get(net_row.get("type", ""), ())
+        host_moref = net_row.get("host_moref", "")
+        if host_moref:
+            host_name = data.get("hosts", {}).get(host_moref, {}).get("name", host_moref)
+            parent = ("hosts", host_moref, host_name)
+        else:
+            parent = ("root", entry.entry_id, entry.title)
+        yield (
+            ("networks", net_moref),
+            partial(
+                _build_child_sensors,
+                coordinator,
+                entry,
+                *parent,
+                "networks",
+                net_moref,
+                descriptions,
+                net_row.get("name", net_moref),
+            ),
+        )
 
     # Performance sensors — only created when performance category is enabled
-    if categories.get("performance"):
-        for moref, obj_data in coordinator.data.get("hosts", {}).items():
-            name = obj_data.get("name", moref)
-            for desc in HOST_PERF_SENSORS:
-                entities.append(VSpherePerfSensor(coordinator, entry, "hosts", moref, name, desc, perf_coordinator))
-        for moref, obj_data in coordinator.data.get("vms", {}).items():
-            name = obj_data.get("name", moref)
-            for desc in VM_PERF_SENSORS:
-                entities.append(VSpherePerfSensor(coordinator, entry, "vms", moref, name, desc, perf_coordinator))
-        for moref, obj_data in coordinator.data.get("datastores", {}).items():
-            name = obj_data.get("name", moref)
-            for desc in DATASTORE_PERF_SENSORS:
-                entities.append(
-                    VSpherePerfSensor(coordinator, entry, "datastores", moref, name, desc, perf_coordinator)
-                )
+    for data_key, descs in (
+        ("hosts", HOST_PERF_SENSORS),
+        ("vms", VM_PERF_SENSORS),
+        ("datastores", DATASTORE_PERF_SENSORS),
+    ):
+        for moref, row in iter_rows(data, categories, entity_filter, "performance", data_key):
+            yield (
+                (f"perf_{data_key}", moref),
+                partial(_build_perf_sensors, coordinator, entry, data_key, moref, row, descs, perf_coordinator),
+            )
 
     # Storage advanced sensors — attach to parent VM device, read from "storage_advanced" data
-    if categories.get(Category.STORAGE_ADVANCED):
-        vms_data = coordinator.data.get("vms", {})
-        for storage_moref, obj_data in coordinator.data.get("storage_advanced", {}).items():
-            name = obj_data.get("name", storage_moref)
-            vm_moref = obj_data.get("vm_moref", "")
-            vm_name = vms_data.get(vm_moref, {}).get("name", vm_moref)
-            descriptions = VM_STORAGE_SUMMARY_SENSORS if "_storage_summary" in storage_moref else VM_DISK_SENSORS
-            for description in descriptions:
-                entities.append(
-                    VSphereChildSensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        parent_object_type="vms",
-                        parent_moref=vm_moref,
-                        parent_name=vm_name,
-                        data_category="storage_advanced",
-                        data_moref=storage_moref,
-                        description=description,
-                        entity_name=name,
-                    )
-                )
+    for storage_moref, st_row in iter_rows(data, categories, entity_filter, "storage_advanced"):
+        vm_moref = st_row.get("vm_moref", "")
+        vm_name = data.get("vms", {}).get(vm_moref, {}).get("name", vm_moref)
+        descs = VM_STORAGE_SUMMARY_SENSORS if "_storage_summary" in storage_moref else VM_DISK_SENSORS
+        yield (
+            ("storage_advanced", storage_moref),
+            partial(
+                _build_child_sensors,
+                coordinator,
+                entry,
+                "vms",
+                vm_moref,
+                vm_name,
+                "storage_advanced",
+                storage_moref,
+                descs,
+                st_row.get("name", storage_moref),
+            ),
+        )
 
-    # Alarm count sensors — created for each host/VM when events_alarms is enabled
-    if categories.get(Category.EVENTS_ALARMS):
-        for moref, obj_data in coordinator.data.get("hosts", {}).items():
-            name = obj_data.get("name", moref)
-            for desc in ALARM_SENSORS:
-                entities.append(
-                    VSphereAlarmSensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        object_type="hosts",
-                        moref=moref,
-                        name=name,
-                        description=desc,
-                    )
-                )
-        for moref, obj_data in coordinator.data.get("vms", {}).items():
-            name = obj_data.get("name", moref)
-            for desc in ALARM_SENSORS:
-                entities.append(
-                    VSphereAlarmSensor(
-                        coordinator=coordinator,
-                        entry=entry,
-                        object_type="vms",
-                        moref=moref,
-                        name=name,
-                        description=desc,
-                    )
-                )
+    # Alarm count sensors — one set per host/VM when events_alarms is enabled
+    for data_key in ("hosts", "vms"):
+        for moref, row in iter_rows(data, categories, entity_filter, Category.EVENTS_ALARMS, data_key):
+            yield (
+                (f"alarm_{data_key}", moref),
+                partial(_build_alarm_sensors, coordinator, entry, data_key, moref, row),
+            )
 
-    async_add_entities(entities)
+
+_NETWORK_TYPE_MAP: dict[str, tuple[VSphereSensorDescription, ...]] = {
+    "vswitch": VSWITCH_SENSORS,
+    "pnic": PNIC_SENSORS,
+    "portgroup": PORTGROUP_SENSORS,
+    "dvswitch": DVSWITCH_SENSORS,
+    "dvportgroup": DVPORTGROUP_SENSORS,
+}
+
+
+def _build_object_sensors(
+    coordinator: VSphereData,
+    entry: VSphereConfigEntry,
+    object_type: str,
+    moref: str,
+    row: dict[str, Any],
+    descriptions: tuple[VSphereSensorDescription, ...],
+    skip_keys: set[str],
+) -> list[Entity]:
+    name: str = row.get("name", moref)
+    return [
+        VSphereSensor(
+            coordinator=coordinator,
+            entry=entry,
+            object_type=object_type,
+            moref=moref,
+            name=name,
+            description=d,
+        )
+        for d in descriptions
+        if d.key not in skip_keys
+    ]
+
+
+def _build_child_sensors(
+    coordinator: VSphereData,
+    entry: VSphereConfigEntry,
+    parent_object_type: str,
+    parent_moref: str,
+    parent_name: str,
+    data_category: str,
+    data_moref: str,
+    descriptions: tuple[VSphereSensorDescription, ...],
+    entity_name: str,
+) -> list[Entity]:
+    return [
+        VSphereChildSensor(
+            coordinator=coordinator,
+            entry=entry,
+            parent_object_type=parent_object_type,
+            parent_moref=parent_moref,
+            parent_name=parent_name,
+            data_category=data_category,
+            data_moref=data_moref,
+            description=d,
+            entity_name=entity_name,
+        )
+        for d in descriptions
+    ]
+
+
+def _build_perf_sensors(
+    coordinator: VSphereData,
+    entry: VSphereConfigEntry,
+    object_type: str,
+    moref: str,
+    row: dict[str, Any],
+    descriptions: tuple[VSphereSensorDescription, ...],
+    perf_coordinator: VSpherePerfCoordinator | None,
+) -> list[Entity]:
+    name: str = row.get("name", moref)
+    return [VSpherePerfSensor(coordinator, entry, object_type, moref, name, d, perf_coordinator) for d in descriptions]
+
+
+def _build_alarm_sensors(
+    coordinator: VSphereData,
+    entry: VSphereConfigEntry,
+    object_type: str,
+    moref: str,
+    row: dict[str, Any],
+) -> list[Entity]:
+    name: str = row.get("name", moref)
+    return [
+        VSphereAlarmSensor(
+            coordinator=coordinator,
+            entry=entry,
+            object_type=object_type,
+            moref=moref,
+            name=name,
+            description=d,
+        )
+        for d in ALARM_SENSORS
+    ]
 
 
 class VSphereSensor(VSphereEntity, SensorEntity):
@@ -894,7 +933,7 @@ class VSphereSensor(VSphereEntity, SensorEntity):
     def __init__(
         self,
         coordinator: VSphereData,
-        entry: ConfigEntry,
+        entry: VSphereConfigEntry,
         object_type: str,
         moref: str,
         name: str,
@@ -931,7 +970,7 @@ class VSphereChildSensor(VSphereChildEntity, SensorEntity):
     def __init__(
         self,
         coordinator: VSphereData,
-        entry: ConfigEntry,
+        entry: VSphereConfigEntry,
         parent_object_type: str,
         parent_moref: str,
         parent_name: str,
@@ -963,7 +1002,7 @@ class VSpherePerfSensor(VSphereEntity, SensorEntity):
     def __init__(
         self,
         coordinator: VSphereData,
-        entry: ConfigEntry,
+        entry: VSphereConfigEntry,
         object_type: str,
         moref: str,
         name: str,
@@ -1000,7 +1039,7 @@ class VSphereAlarmSensor(VSphereEntity, SensorEntity):
     def __init__(
         self,
         coordinator: VSphereData,
-        entry: ConfigEntry,
+        entry: VSphereConfigEntry,
         object_type: str,
         moref: str,
         name: str,

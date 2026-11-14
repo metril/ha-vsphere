@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import Platform
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
@@ -27,18 +28,28 @@ from .const import (
     DOMAIN,
     Category,
 )
-from .coordinator import VSphereData, VSphereInventoryCoordinator, VSpherePerfCoordinator
+from .coordinator import (
+    VSphereConfigEntry,
+    VSphereData,
+    VSphereInventoryCoordinator,
+    VSpherePerfCoordinator,
+    VSphereRuntimeData,
+)
+from .entity import is_stale_unique_id, valid_morefs
 from .event_listener import VSphereEventListener
 from .exceptions import VSphereAuthError, VSphereConnectionError
 from .permissions import PermissionResolver
-from .services import async_register_services, async_unregister_services
+from .services import async_register_services
 from .vsphere_client import VSphereClient
 
 if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+__all__ = ["CONFIG_SCHEMA", "VSphereConfigEntry", "VSphereRuntimeData", "async_setup", "async_setup_entry"]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -49,7 +60,13 @@ PLATFORMS: list[Platform] = [
 ]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Register services once; handlers look up loaded entries at call time."""
+    await async_register_services(hass)
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: VSphereConfigEntry) -> bool:
     """Set up vSphere Control from a config entry."""
     # ------------------------------------------------------------------
     # Validate CA file if configured
@@ -160,33 +177,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.async_on_unload(inventory_coordinator.async_add_listener(coordinator.async_update_listeners))
 
         # ------------------------------------------------------------------
-        # Store runtime objects in hass.data
+        # Store runtime objects on the config entry
         # ------------------------------------------------------------------
-        hass.data.setdefault(DOMAIN, {})
-        hass.data[DOMAIN][entry.entry_id] = {
-            "client": client,
-            "coordinator": coordinator,
-            "event_listener": event_listener,
-            "perf_coordinator": perf_coordinator,
-            "inventory_coordinator": inventory_coordinator,
-            "resolver": resolver,
-        }
+        entry.runtime_data = VSphereRuntimeData(
+            client=client,
+            coordinator=coordinator,
+            event_listener=event_listener,
+            resolver=resolver,
+            perf_coordinator=perf_coordinator,
+            inventory_coordinator=inventory_coordinator,
+        )
 
         # ------------------------------------------------------------------
-        # Forward to platforms
+        # Forward to platforms (each registers its own discovery listener)
         # ------------------------------------------------------------------
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
         # ------------------------------------------------------------------
-        # Clean up stale entities/devices from disabled categories or removed objects
+        # Clean up stale entities/devices now, and at setup; runtime removal is driven by push deletions only
         # ------------------------------------------------------------------
         _async_cleanup_stale_entities(hass, entry, coordinator, categories)
-
-        # ------------------------------------------------------------------
-        # Register services (once, regardless of entry count)
-        # ------------------------------------------------------------------
-        if len(hass.data[DOMAIN]) == 1:
-            await async_register_services(hass)
+        entry.async_on_unload(
+            coordinator.async_add_removal_listener(
+                lambda category, moref: _async_remove_object_entities(hass, entry, category, moref)
+            )
+        )
 
         # ------------------------------------------------------------------
         # Listen for options changes so we can reload
@@ -202,7 +217,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_teardown(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: VSphereConfigEntry,
     event_listener: VSphereEventListener | None,
     perf_coordinator: VSpherePerfCoordinator | None,
     inventory_coordinator: VSphereInventoryCoordinator | None,
@@ -222,16 +237,11 @@ async def _async_teardown(
             await inventory_coordinator.async_shutdown()
     with contextlib.suppress(Exception):
         await hass.async_add_executor_job(client.disconnect_poll)
-    domain_data = hass.data.get(DOMAIN)
-    if domain_data is not None:
-        domain_data.pop(entry.entry_id, None)
-        if not domain_data:
-            hass.data.pop(DOMAIN, None)
 
 
 def _async_cleanup_stale_entities(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: VSphereConfigEntry,
     coordinator: VSphereData,
     categories: dict[str, bool],
 ) -> None:
@@ -245,33 +255,9 @@ def _async_cleanup_stale_entities(
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
 
-    # Build the set of morefs that should have entities right now
-    valid_morefs: set[str] = {entry.entry_id}  # root device
-    for cat_key in ("hosts", "vms", "datastores", "clusters", "resource_pools"):
-        if categories.get(cat_key):
-            valid_morefs.update(coordinator.data.get(cat_key, {}).keys())
-    if categories.get("network"):
-        valid_morefs.update(coordinator.data.get("networks", {}).keys())
-    if categories.get("storage_advanced"):
-        valid_morefs.update(coordinator.data.get("storage_advanced", {}).keys())
-    if categories.get("licenses"):
-        valid_morefs.update(coordinator.data.get("licenses", {}).keys())
-    if categories.get("events_alarms"):
-        # Alarm entities live on host/VM morefs regardless of whether those categories are enabled
-        for cat_key in ("hosts", "vms"):
-            valid_morefs.update(coordinator.data.get(cat_key, {}).keys())
-
-    # Remove entities whose moref is no longer valid
-    prefix = f"{entry.entry_id}_"
+    valid = valid_morefs(coordinator.data or {}, categories, entry.entry_id)
     for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-        uid = ent.unique_id
-        if not uid.startswith(prefix):
-            continue
-        remainder = uid[len(prefix) :]
-        # Check if any valid moref is a prefix of the remainder
-        # (morefs like "host-42" can contain hyphens/numbers)
-        moref_found = any(remainder.startswith(m + "_") or remainder == m for m in valid_morefs)
-        if not moref_found:
+        if is_stale_unique_id(ent.unique_id, entry.entry_id, valid):
             ent_reg.async_remove(ent.entity_id)
 
     # Remove devices with no remaining entities
@@ -280,14 +266,34 @@ def _async_cleanup_stale_entities(
             dev_reg.async_remove_device(dev.id)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a vSphere config entry."""
-    entry_data: dict[str, Any] = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+REMOVABLE_CATEGORIES = frozenset({"hosts", "vms", "datastores", "clusters", "resource_pools"})
 
-    event_listener: VSphereEventListener | None = entry_data.get("event_listener")
-    perf_coordinator: VSpherePerfCoordinator | None = entry_data.get("perf_coordinator")
-    inventory_coordinator: VSphereInventoryCoordinator | None = entry_data.get("inventory_coordinator")
-    client: VSphereClient | None = entry_data.get("client")
+
+def _async_remove_object_entities(hass: HomeAssistant, entry: VSphereConfigEntry, category: str, moref: str) -> None:
+    """Purge registry rows for an object the server genuinely deleted."""
+    if category not in REMOVABLE_CATEGORIES:
+        return
+    for discovery in entry.runtime_data.discoveries:
+        discovery.forget(moref)
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    prefix = f"{entry.entry_id}_{moref}"
+    for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if ent.unique_id == prefix or ent.unique_id.startswith(prefix + "_"):
+            ent_reg.async_remove(ent.entity_id)
+    device = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    if device is not None:
+        # Child entities (VM storage/disks, host network rows) live on this device
+        for ent in er.async_entries_for_device(ent_reg, device.id, include_disabled_entities=True):
+            if ent.config_entry_id == entry.entry_id:
+                ent_reg.async_remove(ent.entity_id)
+        if not er.async_entries_for_device(ent_reg, device.id, include_disabled_entities=True):
+            dev_reg.async_remove_device(device.id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: VSphereConfigEntry) -> bool:
+    """Unload a vSphere config entry."""
+    rt = entry.runtime_data
 
     # Unload platforms first to stop entity callbacks before tearing down data sources
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
@@ -295,33 +301,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Platforms still hold references; keep the listener, coordinators and client alive
         return False
 
-    # Stop the event listener
-    if event_listener is not None:
-        await hass.async_add_executor_job(event_listener.stop)
-
-    # Stop the perf coordinator (cancel its refresh timer)
-    if perf_coordinator is not None:
-        await perf_coordinator.async_shutdown()
-
-    # Stop the inventory coordinator (cancel its refresh timer)
-    if inventory_coordinator is not None:
-        await inventory_coordinator.async_shutdown()
-
-    # Disconnect the poll connection
-    if client is not None:
-        await hass.async_add_executor_job(client.disconnect_poll)
-
-    # Remove from hass.data
-    domain_data = hass.data.get(DOMAIN)
-    if domain_data is not None:
-        domain_data.pop(entry.entry_id, None)
-        if not domain_data:
-            async_unregister_services(hass)
-            hass.data.pop(DOMAIN, None)
+    await hass.async_add_executor_job(rt.event_listener.stop)
+    if rt.perf_coordinator is not None:
+        await rt.perf_coordinator.async_shutdown()
+    if rt.inventory_coordinator is not None:
+        await rt.inventory_coordinator.async_shutdown()
+    await hass.async_add_executor_job(rt.client.disconnect_poll)
 
     return unload_ok
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_update_listener(hass: HomeAssistant, entry: VSphereConfigEntry) -> None:
     """Handle options updates by reloading the entry."""
     await hass.config_entries.async_reload(entry.entry_id)

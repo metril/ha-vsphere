@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.select import SelectEntity
@@ -11,22 +12,26 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     CONF_CATEGORIES,
+    CONF_ENTITY_FILTER,
     DEFAULT_CATEGORIES,
-    DOMAIN,
     SNAP_SELECT_ALL,
     SNAP_SELECT_NONE,
     HostAction,
     VmAction,
 )
-from .entity import VSphereEntity
+from .entity import VSphereEntity, async_setup_discovery, iter_rows
 from .exceptions import VSphereConnectionError, VSphereOperationError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity import Entity
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-    from .coordinator import VSphereData
+    from .coordinator import VSphereConfigEntry, VSphereData, VSphereRuntimeData
+    from .entity import Spec
     from .permissions import PermissionResolver
     from .vsphere_client import VSphereClient
 
@@ -53,64 +58,57 @@ HOST_POWER_OPERATIONS: dict[str, tuple[HostAction, str]] = {
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: VSphereConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up vSphere select entities from a config entry."""
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: VSphereData = entry_data["coordinator"]
-    client: VSphereClient = entry_data["client"]
-    resolver: PermissionResolver = entry_data["resolver"]
+    rt = entry.runtime_data
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
+    entity_filter: dict[str, Any] = entry.options.get(CONF_ENTITY_FILTER, {})
 
-    entities: list[SelectEntity] = []
+    def specs() -> Iterator[Spec]:
+        data: dict[str, Any] = rt.coordinator.data or {}
+        for moref, row in iter_rows(data, categories, entity_filter, "hosts"):
+            yield ("hosts", moref), partial(_build_host_power_select, rt, entry, moref, row)
+            # Conditional entity: appears (as its own key) once the host reports power policies
+            if row.get("available_power_policies"):
+                yield ("host_power_policy", moref), partial(_build_host_policy_select, rt, entry, moref, row)
+        for moref, row in iter_rows(data, categories, entity_filter, "vms"):
+            yield ("vms", moref), partial(_build_vm_selects, rt, entry, moref, row)
 
-    if categories.get("hosts"):
-        for moref, host_data in coordinator.data.get("hosts", {}).items():
-            name: str = host_data.get("name", moref)
-            entities.append(
-                HostPowerOperationSelect(
-                    coordinator=coordinator,
-                    entry=entry,
-                    moref=moref,
-                    name=name,
-                )
-            )
-            policies: list[dict[str, Any]] = host_data.get("available_power_policies", [])
-            if policies:
-                entities.append(
-                    HostPowerPolicySelect(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                        policies=policies,
-                    )
-                )
+    async_setup_discovery(entry, rt.coordinator, async_add_entities, specs)
 
-    if categories.get("vms"):
-        for moref, vm_data in coordinator.data.get("vms", {}).items():
-            name = vm_data.get("name", moref)
-            entities.append(
-                VmPowerOperationSelect(
-                    coordinator=coordinator,
-                    entry=entry,
-                    moref=moref,
-                    name=name,
-                )
-            )
-            entities.append(
-                VmSnapshotSelect(
-                    coordinator=coordinator,
-                    entry=entry,
-                    moref=moref,
-                    name=name,
-                )
-            )
 
-    async_add_entities(entities)
+def _build_host_power_select(
+    rt: VSphereRuntimeData, entry: VSphereConfigEntry, moref: str, row: dict[str, Any]
+) -> list[Entity]:
+    return [HostPowerOperationSelect(coordinator=rt.coordinator, entry=entry, moref=moref, name=row.get("name", moref))]
+
+
+def _build_host_policy_select(
+    rt: VSphereRuntimeData, entry: VSphereConfigEntry, moref: str, row: dict[str, Any]
+) -> list[Entity]:
+    return [
+        HostPowerPolicySelect(
+            coordinator=rt.coordinator,
+            entry=entry,
+            moref=moref,
+            name=row.get("name", moref),
+            client=rt.client,
+            resolver=rt.resolver,
+            policies=row.get("available_power_policies", []),
+        )
+    ]
+
+
+def _build_vm_selects(
+    rt: VSphereRuntimeData, entry: VSphereConfigEntry, moref: str, row: dict[str, Any]
+) -> list[Entity]:
+    name: str = row.get("name", moref)
+    return [
+        VmPowerOperationSelect(coordinator=rt.coordinator, entry=entry, moref=moref, name=name),
+        VmSnapshotSelect(coordinator=rt.coordinator, entry=entry, moref=moref, name=name),
+    ]
 
 
 class HostPowerPolicySelect(VSphereEntity, SelectEntity):
