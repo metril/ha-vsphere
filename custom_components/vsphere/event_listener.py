@@ -152,6 +152,9 @@ class VSphereEventListener:
         }
         # alarm definition key → human-readable name, resolved at initial fetch
         self._alarm_name_cache: dict[str, str] = {}
+        # Raw DRS defaultVmBehavior per cluster, so the level can be re-derived
+        # when DRS is re-enabled (the flat level is None while DRS is off).
+        self._cluster_drs_raw: dict[str, str] = {}
 
     def start(self) -> None:
         """Start listener (called from executor). Connects, fetches initial data, starts loop."""
@@ -259,6 +262,9 @@ class VSphereEventListener:
                 "clusters": {m: dict(row) for m, row in initial_data.get("clusters", {}).items()},
                 "resource_pools": {m: dict(row) for m, row in initial_data.get("resource_pools", {}).items()},
             }
+            self._alarm_cache = {
+                moref: [dict(a) for a in alarm_list] for moref, alarm_list in initial_data.get("alarms", {}).items()
+            }
             self._alarm_name_cache = {
                 a["alarm_key"]: a["alarm_name"]
                 for alarm_list in initial_data.get("alarms", {}).values()
@@ -317,9 +323,11 @@ class VSphereEventListener:
                 version = update_set.version
                 backoff_index = 0
                 consecutive_failures = 0
+                batch: list[tuple[str, str, dict[str, Any]]] = []
                 for filter_update in update_set.filterSet:
                     for obj_update in filter_update.objectSet:
-                        self._process_object_update(obj_update)
+                        self._process_object_update(obj_update, batch=batch)
+                self._dispatch_batch(batch)
             except Exception as err:  # noqa: BLE001
                 if self._stop_event.is_set():
                     break
@@ -358,8 +366,21 @@ class VSphereEventListener:
         options.maxWaitSeconds = WAIT_OPTIONS_MAX_WAIT
         return options
 
-    def _process_object_update(self, obj_update: Any) -> None:
-        """Process a single ObjectUpdate."""
+    def _dispatch_batch(self, batch: list[tuple[str, str, dict[str, Any]]]) -> None:
+        """Send all translated updates of one update_set to the loop in one hop."""
+        if batch:
+            self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_update_from_push_batch, batch)
+
+    def _process_object_update(
+        self,
+        obj_update: Any,
+        batch: list[tuple[str, str, dict[str, Any]]] | None = None,
+    ) -> None:
+        """Process a single ObjectUpdate.
+
+        batch: when given, translated updates are appended instead of dispatched
+        one by one.
+        """
         obj = obj_update.obj
         moref: str = str(obj._moId)  # noqa: SLF001
         kind: str = obj_update.kind
@@ -383,6 +404,9 @@ class VSphereEventListener:
             # Popping unconditionally is harmless when the moref was never cached
             # (e.g. it was filtered out) and keeps this branch simple.
             self._local_state_cache.get(category, {}).pop(moref, None)
+            self._cluster_drs_raw.pop(moref, None)
+            if batch is not None:
+                batch[:] = [b for b in batch if not (b[0] == category and b[1] == moref)]
             if not is_filtered_out:
                 self._hass.loop.call_soon_threadsafe(self._vsphere_data.async_remove_object, category, moref)
                 self._fire_event(
@@ -437,12 +461,15 @@ class VSphereEventListener:
             row = self._local_state_cache[category].setdefault(moref, {"moref": moref})
             row.update(translated)
 
-        self._hass.loop.call_soon_threadsafe(
-            self._vsphere_data.async_update_from_push,
-            category,
-            moref,
-            translated,
-        )
+        if batch is not None:
+            batch.append((category, moref, translated))
+        else:
+            self._hass.loop.call_soon_threadsafe(
+                self._vsphere_data.async_update_from_push,
+                category,
+                moref,
+                translated,
+            )
 
     def _translate_properties(
         self, category: str, raw_props: dict[str, Any], moref: str | None = None
@@ -465,10 +492,20 @@ class VSphereEventListener:
         translated: dict[str, Any] = {}
         for raw_key, value in raw_props.items():
             flat_key = prop_map.get(raw_key)
-            translated[flat_key if flat_key else raw_key] = value
+            if flat_key is None:
+                # Unmapped path (e.g. triggeredAlarmState, config.template): drop it
+                # so raw vmodl objects never reach coordinator data.
+                continue
+            translated[flat_key] = value
 
         # Pass existing stored data for lookups (e.g., max_cpu_mhz for CPU % derivation)
         stored = self._local_state_cache.get(category, {}).get(moref, {}) if moref else {}
+        if category == "clusters" and moref:
+            raw_level = raw_props.get("configuration.drsConfig.defaultVmBehavior")
+            if raw_level is not None:
+                self._cluster_drs_raw[moref] = str(raw_level)
+            if self._cluster_drs_raw.get(moref) is not None:
+                translated["_drs_raw"] = self._cluster_drs_raw[moref]
         if category == "hosts":
             self._derive_host_values(translated, stored)
         elif category == "vms":
@@ -486,18 +523,21 @@ class VSphereEventListener:
         """Compute derived host values from raw inputs."""
         if d.get("connection_state") is not None:
             d["connection_state"] = str(d["connection_state"])
-        if "_uptime_raw" in d:
-            val = d.pop("_uptime_raw")
-            if val is not None:
-                d["uptime_hours"] = round(val / 3600, 2)
-        if "_cpu_usage_raw" in d:
-            val = d.pop("_cpu_usage_raw")
-            if val is not None:
-                d["cpu_usage_ghz"] = round(val / 1000, 2)
-        if "_mem_usage_raw" in d:
-            val = d.pop("_mem_usage_raw")
-            if val is not None:
-                d["mem_usage_gb"] = round(val / 1024, 2)
+        if d.get("state") is not None:
+            d["state"] = str(d["state"])
+        power = d.get("state", (stored or {}).get("state"))
+        off = power is not None and power != "poweredOn"
+        # A None quickStat, or a host that is not powered on, reads as zero.
+        for raw_key, out_key, divisor in (
+            ("_uptime_raw", "uptime_hours", 3600),
+            ("_cpu_usage_raw", "cpu_usage_ghz", 1000),
+            ("_mem_usage_raw", "mem_usage_gb", 1024),
+        ):
+            if raw_key in d:
+                val = d.pop(raw_key)
+                d[out_key] = 0 if off or val is None else round(val / divisor, 2)
+            elif off:
+                d[out_key] = 0
         if "_cpu_mhz" in d or "_cpu_cores" in d:
             mhz = d.pop("_cpu_mhz", None)
             if mhz is None:
@@ -531,10 +571,13 @@ class VSphereEventListener:
                 d.get("power_state", stored.get("power_state")),
                 d.get("connection_state", stored.get("connection_state")),
             )
+        power = d.get("power_state", stored.get("power_state"))
+        off = power is not None and power != "poweredOn"
         if "_uptime_raw" in d:
             val = d.pop("_uptime_raw")
-            if val is not None:
-                d["uptime_hours"] = round(val / 3600, 2)
+            d["uptime_hours"] = 0 if off or val is None else round(val / 3600, 2)
+        elif off:
+            d["uptime_hours"] = 0
         if "_max_cpu" in d:
             d["max_cpu_mhz"] = d.pop("_max_cpu")
         if "_cpu_usage_raw" in d or "max_cpu_mhz" in d:
@@ -553,7 +596,12 @@ class VSphereEventListener:
             max_cpu = d.get("max_cpu_mhz") or stored.get("max_cpu_mhz")
             if usage is not None:
                 d["cpu_usage_mhz"] = usage
-                d["cpu_use_pct"] = round((usage / max_cpu) * 100, 2) if max_cpu else 0.0
+                d["cpu_use_pct"] = round((usage / max_cpu) * 100, 2) if max_cpu and not off else 0.0
+        if off:
+            d["cpu_use_pct"] = 0.0
+        for mem_key in ("memory_used_mb", "memory_active_mb"):
+            if off or (mem_key in d and d[mem_key] is None):
+                d[mem_key] = 0
         if "_storage_raw" in d:
             val = d.pop("_storage_raw")
             if val:
@@ -567,8 +615,7 @@ class VSphereEventListener:
                     host_moref = str(host_obj._moId)
                     d["host_moref"] = host_moref
                     host_data = self._local_state_cache.get("hosts", {}).get(host_moref)
-                    if host_data:
-                        d["host_name"] = host_data.get("name", host_moref)
+                    d["host_name"] = host_data.get("name", host_moref) if host_data else host_moref
         if "_snapshot_obj" in d:
             snap_obj = d.pop("_snapshot_obj")
             if snap_obj is not None and hasattr(snap_obj, "rootSnapshotList"):
@@ -617,12 +664,17 @@ class VSphereEventListener:
         # this pathSet (would need a second TraversalSpec into vim.ResourcePool),
         # so vm_count stays initial-fetch-only; this is not a regression.
         d.pop("_host_list", None)
+        raw_level = d.pop("_drs_raw", None)
         if d.get("drs_automation_level") is not None:
             d["drs_automation_level"] = str(d["drs_automation_level"])
         # get_clusters() reports no automation level while DRS is off — mirror that.
         drs_enabled = d.get("drs_enabled", stored.get("drs_enabled"))
         if drs_enabled is False:
             d["drs_automation_level"] = None
+        elif drs_enabled and "drs_automation_level" not in d and raw_level is not None and "drs_enabled" in d:
+            # DRS just (re-)enabled: the behaviour didn't change so it isn't in the
+            # delta, and the stored level is None — restore it from the raw value.
+            d["drs_automation_level"] = raw_level
 
     def _derive_resource_pool_values(self, d: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
         """Compute derived resource pool values from raw inputs."""
@@ -745,9 +797,9 @@ class VSphereEventListener:
         }
         event_class = event_class_map.get(new_state, f"{entity_type.title()}StateChangeEvent")
 
-        # Try to get entity name
-        name_key = "summary.config.name"
-        entity_name = properties.get(name_key, moref)
+        # Entity name from the thread-owned shadow cache (property deltas rarely
+        # carry the name), falling back to the moref.
+        entity_name = self._local_state_cache.get(category, {}).get(moref, {}).get("name", moref)
 
         self._fire_event(
             "vsphere_event",
@@ -797,13 +849,10 @@ class VSphereEventListener:
         category = "hosts" if entity_type == "host" else "vms"
         entity_name: str = self._local_state_cache.get(category, {}).get(moref, {}).get("name", moref)
 
-        # Fire events for changed alarms — skip first-seen (no prior record) to avoid
-        # spurious events on initial load
+        # Fire events for new or changed alarms. _alarm_cache is seeded from the
+        # initial fetch, so a missing prior status means the alarm appeared mid-session.
         for alarm in alarms:
             old_status = old_statuses.get(alarm["alarm_key"])
-            # Skip alarms that have no prior state — these are first-seen during initial load
-            if old_status is None:
-                continue
             if old_status != alarm["status"]:
                 self._fire_event(
                     "vsphere_alarm_triggered",
@@ -865,6 +914,7 @@ class VSphereEventListener:
             self._categories, self._entity_filter
         )
         self._alarm_cache.clear()
+        self._cluster_drs_raw.clear()
         self._vm_power_cache.clear()
         # _local_state_cache is deliberately NOT cleared: _do_initial_fetch replaces
         # it wholesale, and keeping it lets the re-enter pushes after a reconnect

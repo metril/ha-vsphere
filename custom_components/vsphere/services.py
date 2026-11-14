@@ -133,7 +133,7 @@ _SCHEMA_REMOVE_SNAPSHOTS = vol.Schema(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_device(hass: HomeAssistant, device_id: str) -> tuple[Any, Any, str, str]:
+def _resolve_device(hass: HomeAssistant, device_id: str, *, allow_root: bool = False) -> tuple[Any, Any, str, str]:
     """Resolve a device_id to (client, resolver, entry_id, moref).
 
     Device identifiers for this integration use the format:
@@ -170,7 +170,7 @@ def _resolve_device(hass: HomeAssistant, device_id: str) -> tuple[Any, Any, str,
 
     if entry_id is None:
         raise HomeAssistantError(f"Cannot extract vSphere identifiers from device '{device_id}'")
-    if not moref:
+    if not moref and not allow_root:
         raise HomeAssistantError(
             "This service must target a specific host or VM device, not the root vCenter/ESXi device"
         )
@@ -186,7 +186,7 @@ def _resolve_device(hass: HomeAssistant, device_id: str) -> tuple[Any, Any, str,
     if client is None:
         raise HomeAssistantError(f"vSphere client not found for config entry '{entry_id}'")
 
-    return client, resolver, entry_id, moref
+    return client, resolver, entry_id, moref or ""
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +303,7 @@ async def _handle_remove_snapshot(call: ServiceCall) -> None:
 
 async def _handle_list_hosts(call: ServiceCall) -> dict[str, Any]:
     """Handle the list_hosts service call."""
-    client, _, _, _ = _resolve_device(call.hass, call.data[ATTR_DEVICE_ID])
+    client, _, _, _ = _resolve_device(call.hass, call.data[ATTR_DEVICE_ID], allow_root=True)
     try:
         hosts = await call.hass.async_add_executor_job(client.list_hosts)
     except (VSphereOperationError, VSphereConnectionError) as err:

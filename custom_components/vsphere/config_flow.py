@@ -718,6 +718,11 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
                     reconfigure_entry,
                     unique_id=new_unique_id,
                     data={**existing_data, **flat_input},
+                    **(
+                        {"title": flat_input[CONF_HOST]}
+                        if flat_input[CONF_HOST] != existing_data.get(CONF_HOST)
+                        else {}
+                    ),
                 )
 
         return self.async_show_form(
@@ -733,7 +738,7 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
     @staticmethod
     def async_get_options_flow(config_entry: ConfigEntry) -> VSphereOptionsFlow:
         """Return the options flow handler."""
-        return VSphereOptionsFlow(config_entry)
+        return VSphereOptionsFlow()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -796,14 +801,14 @@ class VSphereConfigFlow(_RestrictionFlowMixin, ConfigFlow, domain=DOMAIN):
 class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlow):
     """Hub-menu options flow for vSphere Control. Each menu option opens a sub-wizard."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize the options flow — load all current options upfront."""
-        current = dict(config_entry.options)
-        self._new_categories: dict[str, bool] = dict(current.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
-        self._new_perf_interval: int = current.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)
-        self._new_inventory_interval: int = current.get(CONF_INVENTORY_INTERVAL, DEFAULT_INVENTORY_INTERVAL)
-        self._entity_filter: dict[str, Any] = dict(current.get(CONF_ENTITY_FILTER, {}))
-        self._restrictions: dict[str, Any] = copy.deepcopy(current.get(CONF_RESTRICTIONS, {}))
+    def __init__(self) -> None:
+        """Initialize empty state; options load lazily (config_entry is set by HA later)."""
+        self._options_loaded: bool = False
+        self._new_categories: dict[str, bool] = {}
+        self._new_perf_interval: int = DEFAULT_PERF_INTERVAL
+        self._new_inventory_interval: int = DEFAULT_INVENTORY_INTERVAL
+        self._entity_filter: dict[str, Any] = {}
+        self._restrictions: dict[str, Any] = {}
         self._inventory: dict[str, dict[str, Any]] = {}
         self._inventory_loaded: bool = False
         self._filterable_remaining: list[Category] = []
@@ -811,6 +816,18 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlow):
         self._current_filter_category: Category | None = None
         self._current_vm_moref: str | None = None
         self._current_host_moref: str | None = None
+
+    def _load_options(self) -> None:
+        """Load current entry options once, on first step."""
+        if self._options_loaded:
+            return
+        current = dict(self.config_entry.options)
+        self._new_categories = dict(current.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
+        self._new_perf_interval = current.get(CONF_PERF_INTERVAL, DEFAULT_PERF_INTERVAL)
+        self._new_inventory_interval = current.get(CONF_INVENTORY_INTERVAL, DEFAULT_INVENTORY_INTERVAL)
+        self._entity_filter = dict(current.get(CONF_ENTITY_FILTER, {}))
+        self._restrictions = copy.deepcopy(current.get(CONF_RESTRICTIONS, {}))
+        self._options_loaded = True
 
     async def _ensure_inventory(self) -> None:
         """Load inventory once (lazy, shared across all sub-flows)."""
@@ -871,6 +888,7 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show the top-level options hub."""
+        self._load_options()
         await self._ensure_inventory()
         return self.async_show_menu(
             step_id="init",
@@ -955,6 +973,9 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlow):
         )
         existing_filter = self._entity_filter.get(category.value, {})
         default_selected = existing_filter.get("morefs", [])
+        if self._inventory:
+            valid = {o["value"] for o in options}
+            default_selected = [m for m in default_selected if m in valid]
         is_last = not self._filterable_remaining
 
         return self.async_show_form(

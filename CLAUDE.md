@@ -1,7 +1,7 @@
 # ha-vsphere
 
 Home Assistant custom integration for VMware vSphere monitoring and control.
-**Version:** 3.9.0 | **Domain:** `vsphere` | **IoT Class:** `local_push`
+**Version:** 3.10.0 | **Domain:** `vsphere` | **IoT Class:** `local_push`
 
 ## Project Structure
 
@@ -31,7 +31,7 @@ custom_components/vsphere/
 
 - `docs/superpowers/` — Design specs and plans (local only, gitignored)
 - `.github/workflows/` — `validate` (hassfest + HACS), `ci` (ruff + pytest, mypy advisory), `release` (automatic on merge to main when the manifest version is new: tags `v<version>` + GitHub release)
-- `tests/` — 112 unit tests. Pure-unit only: `conftest.py` mocks every `homeassistant.*`
+- `tests/` — 128 unit tests (run in parallel via pytest-xdist). Pure-unit only: `conftest.py` mocks every `homeassistant.*`
   module, so classes subclassing `CoordinatorEntity`/`DataUpdateCoordinator` resolve to
   non-functional mocks and **cannot be tested**. Keep branching logic in module-level
   functions (`derive_vm_state`, `is_vm_disconnected`, `_duration_to_seconds`) so it stays testable.
@@ -71,9 +71,7 @@ uv run mypy custom_components/vsphere/   # advisory: 22 pre-existing errors
   drops. `is_vm_disconnected()` also cascades to the parent host and is evaluated at read time, because
   a host row changing does not recompute the VM rows pointing at it.
 - **ContainerView cleanup:** tracked and destroyed on stop/reconnect
-- **Git identity:** author `metril <1517921+metril@users.noreply.github.com>`
 - **Never commit `docs/`** — specs and plans are local working files
-- **Never mention AI/Claude** in commits or code
 
 ## Architecture
 
@@ -129,4 +127,4 @@ The resolver handles only user-configured restrictions:
 ## Dependencies
 
 - `pyvmomi>=8.0.3` — VMware vSphere API SDK
-- Home Assistant Core 2024.12.0+
+- Home Assistant Core 2026.3.0+ (Python 3.14.2+)

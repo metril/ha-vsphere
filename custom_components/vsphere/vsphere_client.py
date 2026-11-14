@@ -133,23 +133,24 @@ class VSphereClient:
 
     def disconnect_poll(self) -> None:
         """Close the on-demand poll connection."""
-        self._disconnect(self._poll_conn)
-        self._poll_conn = None
+        with self._poll_lock:
+            self._disconnect(self._poll_conn)
+            self._poll_conn = None
 
     @property
     def poll_connection(self) -> Any:
         """Return the on-demand poll connection."""
         return self._poll_conn
 
-    def ensure_poll_connection(self) -> None:
-        """Reconnect the poll connection if the session has died."""
+    def ensure_poll_connection(self) -> Any:
+        """Reconnect the poll connection if the session has died; return it."""
         with self._poll_lock:
             if self._poll_conn is None:
                 self.connect_poll()
-                return
+                return self._poll_conn
 
             try:
-                # Accessing currentTime() is a cheap liveness probe
+                # Cheap liveness probe
                 self._poll_conn.CurrentTime()
             except Exception:  # noqa: BLE001
                 _LOGGER.debug("Poll connection lost; reconnecting", exc_info=True)
@@ -157,6 +158,7 @@ class VSphereClient:
                 self._poll_conn = None
                 self._counter_cache = None
                 self.connect_poll()
+            return self._poll_conn
 
     # ------------------------------------------------------------------
     # Connectivity test
@@ -604,8 +606,8 @@ class VSphereClient:
 
     def get_alarms(self) -> dict[str, list[dict[str, Any]]]:
         """Fetch current triggered alarms for all hosts and VMs."""
-        self.ensure_poll_connection()
-        content = self._poll_conn.RetrieveContent()
+        conn = self.ensure_poll_connection()
+        content = conn.RetrieveContent()
         alarms: dict[str, list[dict[str, Any]]] = {}
 
         # Host alarms
@@ -694,30 +696,24 @@ class VSphereClient:
     # ------------------------------------------------------------------
 
     def _get_vm_by_moref(self, moref: str) -> Any:
-        """Find a VirtualMachine object by MoRef ID using the poll connection."""
-        self.ensure_poll_connection()
-        content = self._poll_conn.RetrieveContent()
-        view = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
+        """Build a VirtualMachine proxy by MoRef ID (validated via a property read)."""
+        conn = self.ensure_poll_connection()
+        vm = vim.VirtualMachine(moref, conn._stub)  # noqa: SLF001
         try:
-            for vm_obj in view.view:
-                if vm_obj._moId == moref:  # noqa: SLF001
-                    return vm_obj
-        finally:
-            view.Destroy()
-        raise VSphereOperationError(f"VM with MoRef '{moref}' not found")
+            _ = vm.name
+        except vmodl.fault.ManagedObjectNotFound as exc:
+            raise VSphereOperationError(f"VM with MoRef '{moref}' not found") from exc
+        return vm
 
     def _get_host_by_moref(self, moref: str) -> Any:
-        """Find a HostSystem object by MoRef ID using the poll connection."""
-        self.ensure_poll_connection()
-        content = self._poll_conn.RetrieveContent()
-        view = content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)
+        """Build a HostSystem proxy by MoRef ID (validated via a property read)."""
+        conn = self.ensure_poll_connection()
+        host = vim.HostSystem(moref, conn._stub)  # noqa: SLF001
         try:
-            for host in view.view:
-                if host._moId == moref:  # noqa: SLF001
-                    return host
-        finally:
-            view.Destroy()
-        raise VSphereOperationError(f"Host with MoRef '{moref}' not found")
+            _ = host.name
+        except vmodl.fault.ManagedObjectNotFound as exc:
+            raise VSphereOperationError(f"Host with MoRef '{moref}' not found") from exc
+        return host
 
     # ------------------------------------------------------------------
     # Performance metrics
@@ -734,8 +730,8 @@ class VSphereClient:
         Returns dict keyed by moref with counter values.
         Uses the PerformanceManager's QueryPerf API with 20-second interval.
         """
-        self.ensure_poll_connection()
-        content = self._poll_conn.RetrieveContent()
+        conn = self.ensure_poll_connection()
+        content = conn.RetrieveContent()
         perf_manager = content.perfManager
 
         if not perf_manager:
@@ -751,7 +747,7 @@ class VSphereClient:
         # Query hosts
         for moref in host_morefs:
             try:
-                host_obj = self._get_managed_object(vim.HostSystem, moref)
+                host_obj = self._get_managed_object(vim.HostSystem, moref, conn)
                 if host_obj:
                     data = self._query_entity_perf(perf_manager, host_obj, counter_ids, "host")
                     if data:
@@ -762,7 +758,7 @@ class VSphereClient:
         # Query VMs
         for moref in vm_morefs:
             try:
-                vm_obj = self._get_managed_object(vim.VirtualMachine, moref)
+                vm_obj = self._get_managed_object(vim.VirtualMachine, moref, conn)
                 if vm_obj:
                     data = self._query_entity_perf(perf_manager, vm_obj, counter_ids, "vm")
                     if data:
@@ -773,7 +769,7 @@ class VSphereClient:
         # Query datastores
         for moref in datastore_morefs:
             try:
-                ds_obj = self._get_managed_object(vim.Datastore, moref)
+                ds_obj = self._get_managed_object(vim.Datastore, moref, conn)
                 if ds_obj:
                     data = self._query_entity_perf(perf_manager, ds_obj, counter_ids, "datastore")
                     if data:
@@ -797,17 +793,15 @@ class VSphereClient:
         self._counter_cache = counters
         return counters
 
-    def _get_managed_object(self, obj_type: type, moref: str) -> Any | None:
-        """Get a managed object by type and MoRef string."""
-        content = self._poll_conn.RetrieveContent()
-        container = content.viewManager.CreateContainerView(content.rootFolder, [obj_type], True)
+    def _get_managed_object(self, obj_type: type, moref: str, conn: Any = None) -> Any | None:
+        """Build a managed object proxy by type and MoRef; None if it no longer exists."""
+        conn = conn or self.ensure_poll_connection()
+        obj = obj_type(moref, conn._stub)  # noqa: SLF001
         try:
-            for obj in container.view:
-                if str(obj._moId) == moref:  # noqa: SLF001
-                    return obj
-        finally:
-            container.Destroy()
-        return None
+            _ = obj.name
+        except vmodl.fault.ManagedObjectNotFound:
+            return None
+        return obj
 
     def _query_entity_perf(
         self,
@@ -948,22 +942,19 @@ class VSphereClient:
         Returns dict keyed by composite moref: "{vm_moref}_disk_{disk_key}"
         or "{vm_moref}_storage_summary".
         """
-        self.ensure_poll_connection()
-        content = self._poll_conn.RetrieveContent()
+        conn = self.ensure_poll_connection()
+        content = conn.RetrieveContent()
         container = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
         storage: dict[str, dict[str, Any]] = {}
+        ds_names: dict[str, str] = {}
         try:
             for vm_obj in container.view:
-                if getattr(getattr(vm_obj, "config", None), "template", False):
-                    continue
                 vm_moref = str(vm_obj._moId)  # noqa: SLF001
                 try:
-                    vm_name = vm_obj.summary.config.name
-
-                    # Per-disk storage from vm.layoutEx
-                    layout = getattr(vm_obj, "layoutEx", None)
-                    if not layout:
+                    if getattr(getattr(vm_obj, "config", None), "template", False):
                         continue
+                    summary = vm_obj.summary
+                    vm_name = summary.config.name
 
                     # Get virtual disks from config
                     for device in vm_obj.config.hardware.device or []:
@@ -983,7 +974,11 @@ class VSphereClient:
                         thin_provisioned = getattr(backing, "thinProvisioned", None)
                         datastore_name = None
                         if hasattr(backing, "datastore") and backing.datastore:
-                            datastore_name = backing.datastore.name
+                            ds = backing.datastore
+                            ds_key = str(ds._moId)  # noqa: SLF001
+                            if ds_key not in ds_names:
+                                ds_names[ds_key] = ds.name
+                            datastore_name = ds_names[ds_key]
 
                         disk_key = f"{vm_moref}_disk_{device.key}"
                         storage[disk_key] = {
@@ -998,10 +993,10 @@ class VSphereClient:
                         }
 
                     # Storage summary per VM
-                    if vm_obj.summary.storage:
-                        committed = vm_obj.summary.storage.committed
-                        uncommitted = vm_obj.summary.storage.uncommitted
-                        unshared = vm_obj.summary.storage.unshared
+                    if summary.storage:
+                        committed = summary.storage.committed
+                        uncommitted = summary.storage.uncommitted
+                        unshared = summary.storage.unshared
                         storage[f"{vm_moref}_storage_summary"] = {
                             "moref": f"{vm_moref}_storage_summary",
                             "name": f"{vm_name} - Storage Summary",
@@ -1514,9 +1509,6 @@ class VSphereClient:
         pc = content.propertyCollector
         containers: list[Any] = []
 
-        obj_specs: list[Any] = []
-        prop_specs: list[Any] = []
-
         # Collect categories to watch, adding hosts/vms when events_alarms is on
         # even if those categories are not explicitly enabled.
         watch_categories: dict[str, bool] = dict(categories)
@@ -1524,6 +1516,25 @@ class VSphereClient:
             watch_categories["hosts"] = True
             watch_categories["vms"] = True
 
+        try:
+            return self._build_property_filter(content, pc, categories, watch_categories, containers)
+        except Exception:
+            for c in containers:
+                with contextlib.suppress(Exception):
+                    c.Destroy()
+            raise
+
+    def _build_property_filter(
+        self,
+        content: Any,
+        pc: Any,
+        categories: dict[str, bool],
+        watch_categories: dict[str, bool],
+        containers: list[Any],
+    ) -> tuple[Any, Any, list[Any]]:
+        """Create views + filter; caller cleans up containers on failure."""
+        obj_specs: list[Any] = []
+        prop_specs: list[Any] = []
         for category, enabled in watch_categories.items():
             if not enabled:
                 continue
