@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     CONF_CATEGORIES,
+    CONF_ENTITY_FILTER,
     DEFAULT_CATEGORIES,
     DOMAIN,
     SNAP_ALL,
@@ -17,15 +19,19 @@ from .const import (
     SNAP_SELECT_NONE,
     VmAction,
 )
-from .entity import VSphereEntity
+from .entity import VSphereEntity, async_setup_discovery, iter_rows
 from .exceptions import VSphereConnectionError, VSphereOperationError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity import Entity
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-    from .coordinator import VSphereData
+    from .coordinator import VSphereConfigEntry, VSphereData, VSphereRuntimeData
+    from .entity import Spec
     from .permissions import PermissionResolver
     from .vsphere_client import VSphereClient
 
@@ -34,52 +40,46 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: VSphereConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up vSphere buttons from a config entry."""
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: VSphereData = entry_data["coordinator"]
-    client: VSphereClient = entry_data["client"]
-    resolver: PermissionResolver = entry_data["resolver"]
+    rt = entry.runtime_data
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
+    entity_filter: dict[str, Any] = entry.options.get(CONF_ENTITY_FILTER, {})
 
-    entities: list[ButtonEntity] = []
-
-    if categories.get("hosts"):
-        for moref, host_data in coordinator.data.get("hosts", {}).items():
-            name: str = host_data.get("name", moref)
-            entities.append(
-                HostPowerExecuteButton(
-                    coordinator=coordinator,
-                    entry=entry,
-                    moref=moref,
-                    name=name,
-                    client=client,
-                    resolver=resolver,
-                )
+    def specs() -> Iterator[Spec]:
+        data: dict[str, Any] = rt.coordinator.data or {}
+        for moref, row in iter_rows(data, categories, entity_filter, "hosts"):
+            yield ("hosts", moref), partial(_build_buttons, rt, entry, moref, row, (HostPowerExecuteButton,))
+        for moref, row in iter_rows(data, categories, entity_filter, "vms"):
+            yield (
+                ("vms", moref),
+                partial(
+                    _build_buttons,
+                    rt,
+                    entry,
+                    moref,
+                    row,
+                    (VmPowerExecuteButton, VmSnapshotCreateButton, VmSnapshotRemoveButton),
+                ),
             )
 
-    if categories.get("vms"):
-        for moref, vm_data in coordinator.data.get("vms", {}).items():
-            name = vm_data.get("name", moref)
-            for button_cls in (
-                VmPowerExecuteButton,
-                VmSnapshotCreateButton,
-                VmSnapshotRemoveButton,
-            ):
-                entities.append(
-                    button_cls(
-                        coordinator=coordinator,
-                        entry=entry,
-                        moref=moref,
-                        name=name,
-                        client=client,
-                        resolver=resolver,
-                    )
-                )
+    async_setup_discovery(entry, rt.coordinator, async_add_entities, specs)
 
-    async_add_entities(entities)
+
+def _build_buttons(
+    rt: VSphereRuntimeData,
+    entry: VSphereConfigEntry,
+    moref: str,
+    row: dict[str, Any],
+    classes: tuple[type[_VSphereButton], ...],
+) -> list[Entity]:
+    name: str = row.get("name", moref)
+    return [
+        cls(coordinator=rt.coordinator, entry=entry, moref=moref, name=name, client=rt.client, resolver=rt.resolver)  # type: ignore[call-arg]
+        for cls in classes
+    ]
 
 
 class _VSphereButton(VSphereEntity, ButtonEntity):

@@ -833,8 +833,8 @@ class VSphereOptionsFlow(_RestrictionFlowMixin, OptionsFlow):
         """Load inventory once (lazy, shared across all sub-flows)."""
         if self._inventory_loaded:
             return
-        entry_data: dict[str, Any] = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
-        client = entry_data.get("client")
+        runtime = getattr(self.config_entry, "runtime_data", None)
+        client = runtime.client if runtime is not None else None
         if client is not None:
             try:
                 self._inventory = await self.hass.async_add_executor_job(client.enumerate_inventory)

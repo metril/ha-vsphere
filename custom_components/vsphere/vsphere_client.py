@@ -33,6 +33,497 @@ _TASK_POLL_INTERVAL = 2  # seconds
 _TASK_TIMEOUT = 300  # seconds
 
 
+# ----------------------------------------------------------------------
+# Pure translation: PropertyCollector {path: value} dicts -> entity dicts.
+# No pyVmomi dependency so they can be unit-tested with plain objects.
+# ----------------------------------------------------------------------
+
+_GB = 1024**3
+
+
+def _moref_of(ref: Any) -> str:
+    """Return the MoRef ID string of a managed-object reference (or a plain string)."""
+    return ref if isinstance(ref, str) else str(ref._moId)  # noqa: SLF001
+
+
+def _has_prefix(props: dict[str, Any], prefix: str) -> bool:
+    return any(k.startswith(prefix) for k in props)
+
+
+def _snapshot_nodes(snapshots: Any) -> list[Any]:
+    """Recursively flatten a snapshot tree node list."""
+    result: list[Any] = []
+    for snap in snapshots or []:
+        result.append(snap)
+        result.extend(_snapshot_nodes(snap.childSnapshotList))
+    return result
+
+
+HOST_PROPS = [
+    "summary.config.name",
+    "summary.runtime.powerState",
+    "summary.runtime.connectionState",
+    "summary.runtime.inMaintenanceMode",
+    "summary.config.product.version",
+    "summary.config.product.build",
+    "capability.shutdownSupported",
+    "summary.quickStats.uptime",
+    "summary.hardware.cpuMhz",
+    "summary.hardware.numCpuCores",
+    "summary.quickStats.overallCpuUsage",
+    "summary.hardware.memorySize",
+    "summary.quickStats.overallMemoryUsage",
+    "config.powerSystemInfo.currentPolicy.shortName",
+    "config.powerSystemCapability.availablePolicy",
+]
+
+VM_PROPS = [
+    "summary.config.name",
+    "summary.config.uuid",
+    "summary.config.numCpu",
+    "summary.config.memorySizeMB",
+    "runtime.powerState",
+    "runtime.connectionState",
+    "runtime.host",
+    "runtime.maxCpuUsage",
+    "summary.overallStatus",
+    "summary.storage.committed",
+    "summary.guest.toolsStatus",
+    "summary.guest.ipAddress",
+    "summary.guest.guestFullName",
+    "summary.quickStats.overallCpuUsage",
+    "summary.quickStats.hostMemoryUsage",
+    "summary.quickStats.guestMemoryUsage",
+    "summary.quickStats.uptimeSeconds",
+    "snapshot",
+]
+
+DATASTORE_PROPS = [
+    "summary.name",
+    "summary.type",
+    "summary.accessible",
+    "summary.capacity",
+    "summary.freeSpace",
+    "summary.url",
+    "host",
+    "vm",
+]
+
+CLUSTER_PROPS = [
+    "name",
+    "configuration.drsConfig.enabled",
+    "configuration.drsConfig.defaultVmBehavior",
+    "configuration.dasConfig.enabled",
+    "configuration.dasConfig.admissionControlEnabled",
+    "summary.numHosts",
+    "summary.numEffectiveHosts",
+    "summary.totalCpu",
+    "summary.totalMemory",
+    "resourcePool",
+]
+
+RESOURCE_POOL_PROPS = [
+    "name",
+    "config.cpuAllocation.reservation",
+    "config.cpuAllocation.limit",
+    "config.memoryAllocation.reservation",
+    "config.memoryAllocation.limit",
+    "vm",
+]
+
+
+def translate_host(moref: str, props: dict[str, Any]) -> dict[str, Any]:
+    """Translate host PropertyCollector values into the flat host dict."""
+    data: dict[str, Any] = {"moref": moref}
+    data["name"] = props.get("summary.config.name") or moref
+    data["state"] = str(props.get("summary.runtime.powerState", "unknown"))
+    data["connection_state"] = str(props.get("summary.runtime.connectionState", "unknown"))
+    data["maintenance_mode"] = bool(props.get("summary.runtime.inMaintenanceMode", False))
+    data["version"] = props.get("summary.config.product.version") or ""
+    data["build"] = props.get("summary.config.product.build") or ""
+    data["shutdown_supported"] = bool(props.get("capability.shutdownSupported", False))
+
+    uptime = props.get("summary.quickStats.uptime")
+    data["uptime_hours"] = round(uptime / 3600, 2) if uptime else 0.0
+
+    cpu_mhz = props.get("summary.hardware.cpuMhz")
+    cores = props.get("summary.hardware.numCpuCores")
+    if cpu_mhz and cores:
+        data["cpu_mhz"] = cpu_mhz
+        data["cpu_cores"] = cores
+        data["cpu_total_ghz"] = round(cpu_mhz * cores / 1000, 2)
+    else:
+        data["cpu_total_ghz"] = 0.0
+
+    cpu_usage = props.get("summary.quickStats.overallCpuUsage")
+    data["cpu_usage_ghz"] = round(cpu_usage / 1000, 2) if cpu_usage is not None else 0.0
+
+    mem_size = props.get("summary.hardware.memorySize")
+    data["mem_total_gb"] = round(mem_size / _GB, 2) if mem_size else 0.0
+    mem_usage = props.get("summary.quickStats.overallMemoryUsage")
+    data["mem_usage_gb"] = round(mem_usage / 1024, 2) if mem_usage is not None else 0.0
+
+    # vm_count is computed post-fetch from VM data
+    data["vm_count"] = 0
+    data["power_policy"] = props.get("config.powerSystemInfo.currentPolicy.shortName") or ""
+    data["available_power_policies"] = [
+        {"key": p.key, "short_name": p.shortName, "name": p.name}
+        for p in (props.get("config.powerSystemCapability.availablePolicy") or [])
+    ]
+    return data
+
+
+def translate_vm(moref: str, props: dict[str, Any], host_names: dict[str, str]) -> dict[str, Any]:
+    """Translate VM PropertyCollector values into the flat VM dict.
+
+    host_names maps host moref -> name (resolved from a bulk host fetch).
+    """
+    data: dict[str, Any] = {"moref": moref}
+    data["name"] = props.get("summary.config.name") or moref
+    data["uuid"] = props.get("summary.config.uuid") or ""
+    data["cpu_count"] = props.get("summary.config.numCpu") or 0
+    data["memory_allocated_mb"] = props.get("summary.config.memorySizeMB") or 0
+
+    raw_state = str(props.get("runtime.powerState", "unknown"))
+    raw_conn = str(props.get("runtime.connectionState", "unknown"))
+    data["power_state"] = raw_state
+    data["connection_state"] = raw_conn
+    data["state"] = derive_vm_state(raw_state, raw_conn)
+    status = props.get("summary.overallStatus")
+    data["status"] = str(status) if status else "gray"
+
+    committed = props.get("summary.storage.committed")
+    data["used_space_gb"] = round(committed / _GB, 2) if committed else 0.0
+
+    tools = props.get("summary.guest.toolsStatus")
+    data["tools_status"] = str(tools) if tools is not None else "toolsNotInstalled"
+
+    host_ref = props.get("runtime.host")
+    if host_ref:
+        host_moref = _moref_of(host_ref)
+        data["host_moref"] = host_moref
+        data["host_name"] = host_names.get(host_moref) or host_moref
+    else:
+        data["host_moref"] = ""
+        data["host_name"] = ""
+
+    max_cpu = props.get("runtime.maxCpuUsage")
+    if max_cpu:
+        data["max_cpu_mhz"] = max_cpu
+
+    if raw_state == "poweredOn" and _has_prefix(props, "summary.quickStats."):
+        cpu_usage = props.get("summary.quickStats.overallCpuUsage")
+        if cpu_usage is not None and data.get("max_cpu_mhz"):
+            data["cpu_use_pct"] = round(cpu_usage / data["max_cpu_mhz"] * 100, 2)
+        else:
+            data["cpu_use_pct"] = 0.0
+        data["memory_used_mb"] = props.get("summary.quickStats.hostMemoryUsage") or 0
+        data["memory_active_mb"] = props.get("summary.quickStats.guestMemoryUsage") or 0
+        uptime = props.get("summary.quickStats.uptimeSeconds")
+        data["uptime_hours"] = round(uptime / 3600, 2) if uptime else 0.0
+    else:
+        data["cpu_use_pct"] = 0.0
+        data["memory_used_mb"] = 0
+        data["memory_active_mb"] = 0
+        data["uptime_hours"] = 0.0
+
+    data["guest_ip"] = props.get("summary.guest.ipAddress") or ""
+    data["guest_os"] = props.get("summary.guest.guestFullName") or ""
+
+    snap_info = props.get("snapshot")
+    data["snapshots"] = []
+    if snap_info:
+        nodes = _snapshot_nodes(snap_info.rootSnapshotList)
+        data["snapshot_count"] = len(nodes)
+        for sn in nodes:
+            with contextlib.suppress(Exception):
+                data["snapshots"].append({"name": sn.name, "moref": str(sn.snapshot._moId)})  # noqa: SLF001
+    else:
+        data["snapshot_count"] = 0
+    return data
+
+
+def translate_datastore(moref: str, props: dict[str, Any]) -> dict[str, Any]:
+    """Translate datastore PropertyCollector values into the flat datastore dict."""
+    if not props:
+        return {"name": moref}
+    capacity = props.get("summary.capacity")
+    free = props.get("summary.freeSpace")
+    hosts = props.get("host") or []
+    vms = props.get("vm") or []
+    return {
+        "name": props.get("summary.name", moref),
+        "type": props.get("summary.type"),
+        "accessible": props.get("summary.accessible"),
+        "capacity_gb": round(capacity / _GB, 2) if capacity else 0.0,
+        "free_gb": round(free / _GB, 2) if free else 0.0,
+        "used_gb": round((capacity - free) / _GB, 2) if capacity and free is not None else 0.0,
+        "url": props.get("summary.url") or "",
+        "connected_hosts": len(hosts),
+        "host_morefs": [_moref_of(h.key) for h in hosts],
+        "virtual_machines": len(vms),
+    }
+
+
+def translate_cluster(moref: str, props: dict[str, Any], pool_vm_counts: dict[str, int]) -> dict[str, Any]:
+    """Translate cluster values; pool_vm_counts maps resource pool moref -> VM count."""
+    if not props:
+        return {"moref": moref, "name": moref}
+    drs_enabled = props.get("configuration.drsConfig.enabled", False)
+    behavior = props.get("configuration.drsConfig.defaultVmBehavior")
+    total_mem = props.get("summary.totalMemory")
+    pool_ref = props.get("resourcePool")
+    return {
+        "moref": moref,
+        "name": props.get("name", moref),
+        "drs_enabled": drs_enabled,
+        "drs_automation_level": str(behavior) if drs_enabled and behavior is not None else None,
+        "ha_enabled": props.get("configuration.dasConfig.enabled", False),
+        "ha_admission_control": props.get("configuration.dasConfig.admissionControlEnabled", False),
+        "total_hosts": props.get("summary.numHosts", 0),
+        "effective_hosts": props.get("summary.numEffectiveHosts", 0),
+        "total_cpu_mhz": props.get("summary.totalCpu", 0),
+        "total_memory_mb": round(total_mem / (1024 * 1024), 0) if total_mem else 0,
+        "vm_count": pool_vm_counts.get(_moref_of(pool_ref), 0) if pool_ref else 0,
+    }
+
+
+def translate_resource_pool(moref: str, props: dict[str, Any]) -> dict[str, Any]:
+    """Translate resource pool PropertyCollector values into the flat pool dict."""
+    if not props:
+        return {"moref": moref, "name": moref}
+    return {
+        "moref": moref,
+        "name": props.get("name", moref),
+        "cpu_reservation_mhz": props.get("config.cpuAllocation.reservation", 0),
+        "cpu_limit_mhz": props.get("config.cpuAllocation.limit", -1),
+        "memory_reservation_mb": props.get("config.memoryAllocation.reservation", 0),
+        "memory_limit_mb": props.get("config.memoryAllocation.limit", -1),
+        "vm_count": len(props.get("vm") or []),
+    }
+
+
+def translate_host_networks(host_moref: str, props: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Translate one host's config.network into vswitch/pnic/portgroup entries.
+
+    Returns {} for hosts that are not powered on or have no network config.
+    """
+    if str(props.get("summary.runtime.powerState")) != "poweredOn":
+        return {}
+    net_info = props.get("config.network")
+    if not net_info:
+        return {}
+    host_name = props.get("summary.config.name") or host_moref
+    networks: dict[str, dict[str, Any]] = {}
+
+    for vswitch in net_info.vswitch or []:
+        vs_moref = f"{host_moref}_vswitch_{vswitch.name}"
+        networks[vs_moref] = {
+            "moref": vs_moref,
+            "name": f"{host_name} - {vswitch.name}",
+            "type": "vswitch",
+            "num_ports": vswitch.numPorts,
+            "num_ports_used": vswitch.numPorts
+            - (vswitch.numPortsAvailable if hasattr(vswitch, "numPortsAvailable") else 0)
+            if vswitch.numPorts
+            else 0,
+            "mtu": vswitch.mtu,
+            "host_moref": host_moref,
+            "host_name": host_name,
+        }
+
+    for pnic in net_info.pnic or []:
+        pnic_moref = f"{host_moref}_pnic_{pnic.device}"
+        link_speed = pnic.linkSpeed
+        networks[pnic_moref] = {
+            "moref": pnic_moref,
+            "name": f"{host_name} - {pnic.device}",
+            "type": "pnic",
+            "link_up": link_speed is not None,
+            "speed_mbps": link_speed.speedMb if link_speed else None,
+            "mac": pnic.mac,
+            "driver": pnic.driver if hasattr(pnic, "driver") else None,
+            "host_moref": host_moref,
+            "host_name": host_name,
+        }
+
+    for pg in net_info.portgroup or []:
+        pg_moref = f"{host_moref}_pg_{pg.spec.name}"
+        networks[pg_moref] = {
+            "moref": pg_moref,
+            "name": f"{host_name} - {pg.spec.name}",
+            "type": "portgroup",
+            "vlan_id": pg.spec.vlanId,
+            "vswitch_name": pg.spec.vswitchName,
+            "host_moref": host_moref,
+            "host_name": host_name,
+        }
+    return networks
+
+
+def translate_dvswitch(moref: str, props: dict[str, Any]) -> dict[str, Any]:
+    """Translate a distributed virtual switch (props: name, config, summary)."""
+    cfg = props.get("config")
+    summary = props.get("summary")
+    return {
+        "moref": moref,
+        "name": props.get("name", moref),
+        "type": "dvswitch",
+        "num_ports": summary.numPorts if summary else 0,
+        "max_ports": cfg.maxPorts if cfg else 0,
+        "mtu": cfg.maxMtu if cfg else 0,
+        "num_hosts": summary.numHosts if summary else 0,
+        "version": cfg.productInfo.version if cfg and cfg.productInfo else "",
+        "nioc_enabled": bool(getattr(cfg, "networkResourceManagementEnabled", False)),
+        "host_moref": "",
+        "host_name": "",
+    }
+
+
+_BINDING_LABELS = {"earlyBinding": "Static", "lateBinding": "Dynamic", "ephemeral": "Ephemeral"}
+
+
+def translate_dvportgroup(moref: str, pg_config: Any, dvs_name: str) -> dict[str, Any]:
+    """Translate a distributed port group from its `config` object."""
+    vlan_info = ""
+    try:
+        vlan_obj = pg_config.defaultPortConfig.vlan
+        if hasattr(vlan_obj, "vlanId") and isinstance(vlan_obj.vlanId, int):
+            vlan_info = str(vlan_obj.vlanId)
+        elif hasattr(vlan_obj, "pvlanId"):
+            vlan_info = f"pvlan:{vlan_obj.pvlanId}"
+        elif hasattr(vlan_obj, "vlanId"):
+            vlan_info = "trunk"
+    except Exception:  # noqa: BLE001
+        pass
+    raw_binding = pg_config.type if pg_config else ""
+    return {
+        "moref": moref,
+        "name": f"{dvs_name} - {pg_config.name}",
+        "type": "dvportgroup",
+        "vlan_id": vlan_info,
+        "port_binding": _BINDING_LABELS.get(raw_binding, raw_binding),
+        "num_ports": pg_config.numPorts if pg_config else 0,
+        "dvswitch_name": dvs_name,
+        "host_moref": "",
+        "host_name": "",
+    }
+
+
+def translate_vm_storage(
+    vm_moref: str,
+    props: dict[str, Any],
+    disks: list[Any],
+    ds_names: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    """Translate per-VM disk + storage summary entries.
+
+    disks: the VM's VirtualDisk devices (already filtered by the caller).
+    ds_names: datastore moref -> name.
+    Returns {} for templates or VMs without a name.
+    """
+    vm_name = props.get("summary.config.name")
+    if props.get("config.template") or not vm_name:
+        return {}
+    storage: dict[str, dict[str, Any]] = {}
+
+    for device in disks:
+        label = device.deviceInfo.label
+        if getattr(device, "capacityInBytes", None):
+            capacity_gb = round(device.capacityInBytes / _GB, 2)
+        elif getattr(device, "capacityInKB", None):
+            capacity_gb = round(device.capacityInKB / (1024**2), 2)
+        else:
+            capacity_gb = 0.0
+
+        backing = device.backing
+        thin_provisioned = getattr(backing, "thinProvisioned", None)
+        datastore_name = None
+        ds = getattr(backing, "datastore", None)
+        if ds:
+            datastore_name = ds_names.get(_moref_of(ds))
+
+        disk_key = f"{vm_moref}_disk_{device.key}"
+        storage[disk_key] = {
+            "moref": disk_key,
+            "name": f"{vm_name} - {label}",
+            "vm_moref": vm_moref,
+            "vm_name": vm_name,
+            "label": label,
+            "capacity_gb": capacity_gb,
+            "thin_provisioned": thin_provisioned,
+            "datastore": datastore_name,
+        }
+
+    if _has_prefix(props, "summary.storage."):
+        committed = props.get("summary.storage.committed")
+        uncommitted = props.get("summary.storage.uncommitted")
+        unshared = props.get("summary.storage.unshared")
+        key = f"{vm_moref}_storage_summary"
+        storage[key] = {
+            "moref": key,
+            "name": f"{vm_name} - Storage Summary",
+            "vm_moref": vm_moref,
+            "vm_name": vm_name,
+            "label": "Storage Summary",
+            "committed_gb": round(committed / _GB, 2) if committed else 0.0,
+            "uncommitted_gb": round(uncommitted / _GB, 2) if uncommitted else 0.0,
+            "unshared_gb": round(unshared / _GB, 2) if unshared else 0.0,
+        }
+    return storage
+
+
+def translate_licenses(licenses: Any) -> dict[str, dict[str, Any]]:
+    """Translate LicenseManager.licenses; skips invalid and evaluation licenses."""
+    result: dict[str, dict[str, Any]] = {}
+    for lic in licenses or []:
+        key = getattr(lic, "licenseKey", None) or ""
+        product_name = getattr(lic, "name", None)
+
+        if not product_name or str(product_name) == "None":
+            _LOGGER.debug("Skipping invalid license: key=%s, product=%s", key, product_name)
+            continue
+        if key == INVALID_LICENSE_KEY:
+            _LOGGER.debug("Skipping evaluation license: key=%s", key)
+            continue
+
+        total = getattr(lic, "total", 0) or 0
+        used = getattr(lic, "used", 0) or 0
+
+        product = str(product_name)
+        expiration_days: int | str = "never"
+        for prop in getattr(lic, "properties", []):
+            if prop.key == "ProductName":
+                product = str(prop.value)
+            elif prop.key == "count_disabled":
+                expiration_days = "never"
+            elif prop.key == "expirationHours":
+                with contextlib.suppress(TypeError, ValueError):
+                    expiration_days = round(int(prop.value) / 24)
+
+        if isinstance(expiration_days, int):
+            if expiration_days > 30:
+                status = "Ok"
+            elif expiration_days >= 1:
+                status = "Expiring Soon"
+            else:
+                status = "Expired"
+        else:
+            status = "Ok"
+
+        result[key] = {
+            "name": str(product_name),
+            "key": key,
+            "product": product,
+            "status": status,
+            "expiration_days": expiration_days,
+            "total": total,
+            "used": used,
+            "free": max(0, total - used),
+        }
+    return result
+
+
 class VSphereClient:
     """Synchronous pyVmomi wrapper for all vSphere API interaction."""
 
@@ -193,25 +684,76 @@ class VSphereClient:
         content = conn.RetrieveContent()
         return content.viewManager.CreateContainerView(content.rootFolder, obj_type, True)
 
+    def _bulk_retrieve(self, conn: Any, obj_type: Any, paths: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch `paths` for every object of `obj_type` in one PropertyCollector call.
+
+        Returns {moref: {path: value}}. Pages via ContinueRetrievePropertiesEx.
+        Objects missing per-object (missingSet ManagedObjectNotFound) are skipped
+        as genuine deletions. A call-level ManagedObjectNotFound retries the whole
+        fetch once, then raises VSphereConnectionError — never a partial result.
+        """
+        try:
+            return self._bulk_retrieve_once(conn, obj_type, paths)
+        except vmodl.fault.ManagedObjectNotFound:
+            _LOGGER.debug("Object vanished during bulk fetch of %s; retrying", obj_type, exc_info=True)
+        try:
+            return self._bulk_retrieve_once(conn, obj_type, paths)
+        except vmodl.fault.ManagedObjectNotFound as exc:
+            raise VSphereConnectionError(f"Inventory changed repeatedly while fetching {obj_type}") from exc
+
+    def _bulk_retrieve_once(self, conn: Any, obj_type: Any, paths: list[str]) -> dict[str, dict[str, Any]]:
+        """Single attempt of ``_bulk_retrieve``; the ContainerView is always destroyed."""
+        content = conn.RetrieveContent()
+        pc = content.propertyCollector
+        view = content.viewManager.CreateContainerView(content.rootFolder, [obj_type], True)
+        try:
+            traversal = vmodl.query.PropertyCollector.TraversalSpec(
+                name="view_objs", type=vim.view.ContainerView, path="view", skip=False
+            )
+            obj_spec = vmodl.query.PropertyCollector.ObjectSpec(obj=view, skip=True, selectSet=[traversal])
+            prop_spec = vmodl.query.PropertyCollector.PropertySpec(type=obj_type, pathSet=paths, all=False)
+            filter_spec = vmodl.query.PropertyCollector.FilterSpec(objectSet=[obj_spec], propSet=[prop_spec])
+            options = vmodl.query.PropertyCollector.RetrieveOptions(maxObjects=500)
+
+            out: dict[str, dict[str, Any]] = {}
+            result = pc.RetrievePropertiesEx(specSet=[filter_spec], options=options)
+            while result:
+                for obj_content in result.objects:
+                    props = {p.name: p.val for p in obj_content.propSet or []}
+                    if not props and any(
+                        isinstance(getattr(m, "fault", None), vmodl.fault.ManagedObjectNotFound)
+                        for m in obj_content.missingSet or []
+                    ):
+                        continue
+                    out[obj_content.obj._moId] = props  # noqa: SLF001
+                if not result.token:
+                    break
+                result = pc.ContinueRetrievePropertiesEx(token=result.token)
+            return out
+        finally:
+            view.Destroy()
+
+    def _host_name_map(self, conn: Any) -> dict[str, str]:
+        """Return host moref -> name using one bulk call."""
+        hosts = self._bulk_retrieve(conn, vim.HostSystem, ["summary.config.name"])
+        return {m: p["summary.config.name"] for m, p in hosts.items() if p.get("summary.config.name")}
+
     # ------------------------------------------------------------------
     # Data fetching — return dict keyed by MoRef ID
     # ------------------------------------------------------------------
 
     def get_hosts(self) -> dict[str, dict[str, Any]]:
-        """Fetch all HostSystem objects and return parsed host dicts."""
-        conn = self._connect()
-        try:
-            view = self._get_container_view(conn, [vim.HostSystem])
+        """Fetch all HostSystem objects and return parsed host dicts (1 bulk call)."""
+        conn = self.ensure_poll_connection()
+        raw = self._bulk_retrieve(conn, vim.HostSystem, HOST_PROPS)
+        result: dict[str, dict[str, Any]] = {}
+        for moref, props in raw.items():
             try:
-                result: dict[str, dict[str, Any]] = {}
-                for host in view.view:
-                    moref = host._moId  # noqa: SLF001
-                    result[moref] = self._parse_host(host, moref)
-                return result
-            finally:
-                view.Destroy()
-        finally:
-            self._disconnect(conn)
+                result[moref] = translate_host(moref, props)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Error parsing host %s", moref, exc_info=True)
+                result[moref] = {"moref": moref, "name": moref}
+        return result
 
     def count_running_vms_by_host(self) -> tuple[dict[str, int], dict[str, tuple[str, str]]]:
         """Batch-count running (non-template) VMs per host using PropertyCollector.
@@ -223,386 +765,134 @@ class VSphereClient:
               non-template VMs.  EventListener uses this cache to track deltas
               on subsequent PropertyCollector push updates.
         """
-        conn = self._connect()
-        try:
-            content = conn.RetrieveContent()
-            pc = content.propertyCollector
-            view = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
-            try:
-                traversal = vmodl.query.PropertyCollector.TraversalSpec(
-                    name="view_vms",
-                    type=vim.view.ContainerView,
-                    path="view",
-                    skip=False,
-                )
-                obj_spec = vmodl.query.PropertyCollector.ObjectSpec(obj=view, skip=True, selectSet=[traversal])
-                prop_spec = vmodl.query.PropertyCollector.PropertySpec(
-                    type=vim.VirtualMachine,
-                    pathSet=["runtime.powerState", "runtime.host", "config.template"],
-                    all=False,
-                )
-                filter_spec = vmodl.query.PropertyCollector.FilterSpec(objectSet=[obj_spec], propSet=[prop_spec])
-                options = vmodl.query.PropertyCollector.RetrieveOptions(maxObjects=500)
-                result = pc.RetrievePropertiesEx(specSet=[filter_spec], options=options)
-
-                counts: dict[str, int] = {}
-                cache: dict[str, tuple[str, str]] = {}
-                while result:
-                    for obj_content in result.objects:
-                        vm_moref = obj_content.obj._moId  # noqa: SLF001
-                        power_state = ""
-                        host_moref = ""
-                        is_template = False
-                        for prop in obj_content.propSet or []:
-                            if prop.name == "runtime.powerState":
-                                power_state = str(prop.val)
-                            elif prop.name == "runtime.host" and prop.val:
-                                host_moref = prop.val._moId  # noqa: SLF001
-                            elif prop.name == "config.template":
-                                is_template = bool(prop.val)
-                        if not is_template:
-                            cache[vm_moref] = (host_moref, power_state)
-                            if host_moref and power_state == "poweredOn":
-                                counts[host_moref] = counts.get(host_moref, 0) + 1
-                    if result.token:
-                        result = pc.ContinueRetrievePropertiesEx(token=result.token)
-                    else:
-                        break
-                return counts, cache
-            finally:
-                view.Destroy()
-        finally:
-            self._disconnect(conn)
+        conn = self.ensure_poll_connection()
+        raw = self._bulk_retrieve(conn, vim.VirtualMachine, ["runtime.powerState", "runtime.host", "config.template"])
+        counts: dict[str, int] = {}
+        cache: dict[str, tuple[str, str]] = {}
+        for vm_moref, props in raw.items():
+            if props.get("config.template"):
+                continue
+            power_state = str(props["runtime.powerState"]) if "runtime.powerState" in props else ""
+            host_ref = props.get("runtime.host")
+            host_moref = _moref_of(host_ref) if host_ref else ""
+            cache[vm_moref] = (host_moref, power_state)
+            if host_moref and power_state == "poweredOn":
+                counts[host_moref] = counts.get(host_moref, 0) + 1
+        return counts, cache
 
     def get_vms(self) -> dict[str, dict[str, Any]]:
-        """Fetch all VirtualMachine objects and return parsed VM dicts."""
-        conn = self._connect()
-        try:
-            view = self._get_container_view(conn, [vim.VirtualMachine])
+        """Fetch all VirtualMachine objects and return parsed VM dicts (2 bulk calls)."""
+        conn = self.ensure_poll_connection()
+        raw = self._bulk_retrieve(conn, vim.VirtualMachine, VM_PROPS)
+        host_names = self._host_name_map(conn)
+        result: dict[str, dict[str, Any]] = {}
+        for moref, props in raw.items():
             try:
-                result: dict[str, dict[str, Any]] = {}
-                for vm_obj in view.view:
-                    moref = vm_obj._moId  # noqa: SLF001
-                    result[moref] = self._parse_vm(vm_obj, moref)
-                return result
-            finally:
-                view.Destroy()
-        finally:
-            self._disconnect(conn)
+                result[moref] = translate_vm(moref, props, host_names)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Error parsing VM %s", moref, exc_info=True)
+                result[moref] = {"moref": moref, "name": moref}
+        return result
 
     def get_datastores(self) -> dict[str, dict[str, Any]]:
-        """Fetch all Datastore objects and return parsed dicts."""
-        conn = self._connect()
-        try:
-            view = self._get_container_view(conn, [vim.Datastore])
+        """Fetch all Datastore objects and return parsed dicts (1 bulk call)."""
+        conn = self.ensure_poll_connection()
+        raw = self._bulk_retrieve(conn, vim.Datastore, DATASTORE_PROPS)
+        result: dict[str, dict[str, Any]] = {}
+        for moref, props in raw.items():
             try:
-                result: dict[str, dict[str, Any]] = {}
-                for ds in view.view:
-                    moref = ds._moId  # noqa: SLF001
-                    try:
-                        summary = ds.summary
-                        info: dict[str, Any] = {
-                            "name": summary.name,
-                            "type": summary.type,
-                            "accessible": summary.accessible,
-                            "capacity_gb": round(summary.capacity / (1024**3), 2) if summary.capacity else 0.0,
-                            "free_gb": round(summary.freeSpace / (1024**3), 2) if summary.freeSpace else 0.0,
-                            "used_gb": round((summary.capacity - summary.freeSpace) / (1024**3), 2)
-                            if summary.capacity and summary.freeSpace is not None
-                            else 0.0,
-                            "url": summary.url or "",
-                            "connected_hosts": len(ds.host) if ds.host else 0,
-                            "host_morefs": [str(h.key._moId) for h in ds.host] if ds.host else [],  # noqa: SLF001
-                            "virtual_machines": len(ds.vm) if ds.vm else 0,
-                        }
-                    except Exception:  # noqa: BLE001
-                        _LOGGER.debug("Error parsing datastore %s", moref, exc_info=True)
-                        info = {"name": moref}
-                    result[moref] = info
-                return result
-            finally:
-                view.Destroy()
-        finally:
-            self._disconnect(conn)
+                result[moref] = translate_datastore(moref, props)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Error parsing datastore %s", moref, exc_info=True)
+                result[moref] = {"name": moref}
+        return result
 
     def get_clusters(self) -> dict[str, dict[str, Any]]:
-        """Fetch cluster information."""
-        conn = self._connect()
-        try:
-            view = self._get_container_view(conn, [vim.ClusterComputeResource])
+        """Fetch cluster information (2 bulk calls: clusters + resource pool VM counts)."""
+        conn = self.ensure_poll_connection()
+        raw = self._bulk_retrieve(conn, vim.ClusterComputeResource, CLUSTER_PROPS)
+        pools = self._bulk_retrieve(conn, vim.ResourcePool, ["vm"]) if raw else {}
+        pool_vm_counts = {m: len(p.get("vm") or []) for m, p in pools.items()}
+        clusters: dict[str, dict[str, Any]] = {}
+        for moref, props in raw.items():
             try:
-                clusters: dict[str, dict[str, Any]] = {}
-                for cluster in view.view:
-                    moref = cluster._moId  # noqa: SLF001
-                    try:
-                        config = cluster.configuration
-                        summary = cluster.summary
-                        clusters[moref] = {
-                            "moref": moref,
-                            "name": cluster.name,
-                            "drs_enabled": config.drsConfig.enabled if config.drsConfig else False,
-                            "drs_automation_level": str(config.drsConfig.defaultVmBehavior)
-                            if config.drsConfig and config.drsConfig.enabled
-                            else None,
-                            "ha_enabled": config.dasConfig.enabled if config.dasConfig else False,
-                            "ha_admission_control": config.dasConfig.admissionControlEnabled
-                            if config.dasConfig
-                            else False,
-                            "total_hosts": summary.numHosts if summary else 0,
-                            "effective_hosts": summary.numEffectiveHosts if summary else 0,
-                            "total_cpu_mhz": summary.totalCpu if summary else 0,
-                            "total_memory_mb": round(summary.totalMemory / (1024 * 1024), 0)
-                            if summary and summary.totalMemory
-                            else 0,
-                            "vm_count": len(cluster.resourcePool.vm)
-                            if cluster.resourcePool and cluster.resourcePool.vm
-                            else 0,
-                        }
-                    except Exception:  # noqa: BLE001
-                        _LOGGER.debug("Error parsing cluster %s", moref, exc_info=True)
-                        clusters[moref] = {"moref": moref, "name": moref}
-                return clusters
-            finally:
-                view.Destroy()
-        finally:
-            self._disconnect(conn)
+                clusters[moref] = translate_cluster(moref, props, pool_vm_counts)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Error parsing cluster %s", moref, exc_info=True)
+                clusters[moref] = {"moref": moref, "name": moref}
+        return clusters
 
     def get_networks(self) -> dict[str, dict[str, Any]]:
-        """Fetch network information (vSwitches, port groups, physical NICs)."""
-        conn = self._connect()
-        try:
-            view = self._get_container_view(conn, [vim.HostSystem])
-            networks: dict[str, dict[str, Any]] = {}
+        """Fetch network information (vSwitches, port groups, physical NICs, dvSwitches).
+
+        Uses HostSystem.config.network (same HostNetworkInfo as the network
+        system's networkInfo) so no per-host RPC is needed.
+        """
+        conn = self.ensure_poll_connection()
+        networks: dict[str, dict[str, Any]] = {}
+
+        raw_hosts = self._bulk_retrieve(
+            conn,
+            vim.HostSystem,
+            ["summary.config.name", "summary.runtime.powerState", "config.network"],
+        )
+        for host_moref, props in raw_hosts.items():
             try:
-                for host in view.view:
-                    host_moref = host._moId  # noqa: SLF001
-                    try:
-                        host_name = host.summary.config.name
-                        if str(host.summary.runtime.powerState) != "poweredOn":
-                            continue
-                        net_sys = host.configManager.networkSystem
-                        if not net_sys:
-                            continue
-                        net_info = net_sys.networkInfo
-
-                        # Virtual switches
-                        for vswitch in net_info.vswitch or []:
-                            vs_moref = f"{host_moref}_vswitch_{vswitch.name}"
-                            networks[vs_moref] = {
-                                "moref": vs_moref,
-                                "name": f"{host_name} - {vswitch.name}",
-                                "type": "vswitch",
-                                "num_ports": vswitch.numPorts,
-                                "num_ports_used": vswitch.numPorts
-                                - (vswitch.numPortsAvailable if hasattr(vswitch, "numPortsAvailable") else 0)
-                                if vswitch.numPorts
-                                else 0,
-                                "mtu": vswitch.mtu,
-                                "host_moref": host_moref,
-                                "host_name": host_name,
-                            }
-
-                        # Physical NICs
-                        for pnic in net_info.pnic or []:
-                            pnic_moref = f"{host_moref}_pnic_{pnic.device}"
-                            link_speed = pnic.linkSpeed
-                            networks[pnic_moref] = {
-                                "moref": pnic_moref,
-                                "name": f"{host_name} - {pnic.device}",
-                                "type": "pnic",
-                                "link_up": link_speed is not None,
-                                "speed_mbps": link_speed.speedMb if link_speed else None,
-                                "mac": pnic.mac,
-                                "driver": pnic.driver if hasattr(pnic, "driver") else None,
-                                "host_moref": host_moref,
-                                "host_name": host_name,
-                            }
-
-                        # Port groups
-                        for pg in net_info.portgroup or []:
-                            pg_moref = f"{host_moref}_pg_{pg.spec.name}"
-                            networks[pg_moref] = {
-                                "moref": pg_moref,
-                                "name": f"{host_name} - {pg.spec.name}",
-                                "type": "portgroup",
-                                "vlan_id": pg.spec.vlanId,
-                                "vswitch_name": pg.spec.vswitchName,
-                                "host_moref": host_moref,
-                                "host_name": host_name,
-                            }
-                    except Exception:  # noqa: BLE001
-                        _LOGGER.debug("Error parsing network info for host %s", host_moref, exc_info=True)
-            finally:
-                view.Destroy()
-
-            # Distributed virtual switches (datacenter-level)
-            # Wrapped in try/except so standalone ESXi or permission errors
-            # don't discard the already-collected host-level network data.
-            try:
-                dvs_view = self._get_container_view(conn, [vim.DistributedVirtualSwitch])
-                try:
-                    for dvs in dvs_view.view:
-                        dvs_moref = dvs._moId  # noqa: SLF001
-                        try:
-                            dvs_config = dvs.config
-                            dvs_summary = dvs.summary
-                            _binding_labels = {
-                                "earlyBinding": "Static",
-                                "lateBinding": "Dynamic",
-                                "ephemeral": "Ephemeral",
-                            }
-                            networks[dvs_moref] = {
-                                "moref": dvs_moref,
-                                "name": dvs.name,
-                                "type": "dvswitch",
-                                "num_ports": dvs_summary.numPorts if dvs_summary else 0,
-                                "max_ports": dvs_config.maxPorts if dvs_config else 0,
-                                "mtu": dvs_config.maxMtu if dvs_config else 0,
-                                "num_hosts": dvs_summary.numHosts if dvs_summary else 0,
-                                "version": dvs_config.productInfo.version
-                                if dvs_config and dvs_config.productInfo
-                                else "",
-                                "nioc_enabled": bool(getattr(dvs_config, "networkResourceManagementEnabled", False)),
-                                "host_moref": "",
-                                "host_name": "",
-                            }
-
-                            # Distributed port groups on this dvSwitch
-                            for pg in dvs.portgroup or []:
-                                pg_moref = pg._moId  # noqa: SLF001
-                                try:
-                                    pg_config = pg.config
-                                    vlan_info = ""
-                                    try:
-                                        vlan_obj = pg_config.defaultPortConfig.vlan
-                                        if hasattr(vlan_obj, "vlanId") and isinstance(vlan_obj.vlanId, int):
-                                            vlan_info = str(vlan_obj.vlanId)
-                                        elif hasattr(vlan_obj, "pvlanId"):
-                                            vlan_info = f"pvlan:{vlan_obj.pvlanId}"
-                                        elif hasattr(vlan_obj, "vlanId"):
-                                            vlan_info = "trunk"
-                                    except Exception:  # noqa: BLE001
-                                        pass
-                                    raw_binding = pg_config.type if pg_config else ""
-                                    networks[pg_moref] = {
-                                        "moref": pg_moref,
-                                        "name": f"{dvs.name} - {pg_config.name}",
-                                        "type": "dvportgroup",
-                                        "vlan_id": vlan_info,
-                                        "port_binding": _binding_labels.get(raw_binding, raw_binding),
-                                        "num_ports": pg_config.numPorts if pg_config else 0,
-                                        "dvswitch_name": dvs.name,
-                                        "host_moref": "",
-                                        "host_name": "",
-                                    }
-                                except Exception:  # noqa: BLE001
-                                    _LOGGER.debug("Error parsing dvPortgroup %s", pg_moref, exc_info=True)
-                        except Exception:  # noqa: BLE001
-                            _LOGGER.debug("Error parsing dvSwitch %s", dvs_moref, exc_info=True)
-                finally:
-                    dvs_view.Destroy()
+                networks.update(translate_host_networks(host_moref, props))
             except Exception:  # noqa: BLE001
-                _LOGGER.debug("Error enumerating distributed virtual switches", exc_info=True)
+                _LOGGER.debug("Error parsing network info for host %s", host_moref, exc_info=True)
 
-            return networks
-        finally:
-            self._disconnect(conn)
+        # Distributed virtual switches (datacenter-level). Only not-applicable faults
+        # are swallowed; anything else propagates so the inventory refresh fails whole.
+        try:
+            dvs_raw = self._bulk_retrieve(
+                conn, vim.DistributedVirtualSwitch, ["name", "config", "summary", "portgroup"]
+            )
+            dvs_names: dict[str, str] = {}
+            pg_to_dvs: dict[str, str] = {}
+            for dvs_moref, props in dvs_raw.items():
+                try:
+                    networks[dvs_moref] = translate_dvswitch(dvs_moref, props)
+                    dvs_names[dvs_moref] = props.get("name", dvs_moref)
+                    for pg in props.get("portgroup") or []:
+                        pg_to_dvs[_moref_of(pg)] = dvs_moref
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("Error parsing dvSwitch %s", dvs_moref, exc_info=True)
+            if pg_to_dvs:
+                pg_raw = self._bulk_retrieve(conn, vim.dvs.DistributedVirtualPortgroup, ["config"])
+                for pg_moref, props in pg_raw.items():
+                    dvs_moref = pg_to_dvs.get(pg_moref)
+                    pg_config = props.get("config")
+                    if dvs_moref is None or pg_config is None:
+                        continue
+                    try:
+                        networks[pg_moref] = translate_dvportgroup(pg_moref, pg_config, dvs_names[dvs_moref])
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.debug("Error parsing dvPortgroup %s", pg_moref, exc_info=True)
+        except vim.fault.NoPermission, vmodl.fault.NotSupported, vmodl.fault.NotImplemented:  # type: ignore[attr-defined]
+            # No DVS on this endpoint (e.g. standalone ESXi) or not permitted: nothing to add
+            _LOGGER.debug("Distributed virtual switches not available", exc_info=True)
+
+        return networks
 
     def get_resource_pools(self) -> dict[str, dict[str, Any]]:
-        """Fetch resource pool information."""
-        conn = self._connect()
-        try:
-            view = self._get_container_view(conn, [vim.ResourcePool])
+        """Fetch resource pool information (1 bulk call)."""
+        conn = self.ensure_poll_connection()
+        raw = self._bulk_retrieve(conn, vim.ResourcePool, RESOURCE_POOL_PROPS)
+        pools: dict[str, dict[str, Any]] = {}
+        for moref, props in raw.items():
             try:
-                pools: dict[str, dict[str, Any]] = {}
-                for pool in view.view:
-                    moref = pool._moId  # noqa: SLF001
-                    try:
-                        config = pool.config
-                        cpu_alloc = config.cpuAllocation if config else None
-                        mem_alloc = config.memoryAllocation if config else None
-                        pools[moref] = {
-                            "moref": moref,
-                            "name": pool.name,
-                            "cpu_reservation_mhz": cpu_alloc.reservation if cpu_alloc else 0,
-                            "cpu_limit_mhz": cpu_alloc.limit if cpu_alloc else -1,
-                            "memory_reservation_mb": mem_alloc.reservation if mem_alloc else 0,
-                            "memory_limit_mb": mem_alloc.limit if mem_alloc else -1,
-                            "vm_count": len(pool.vm) if pool.vm else 0,
-                        }
-                    except Exception:  # noqa: BLE001
-                        _LOGGER.debug("Error parsing resource pool %s", moref, exc_info=True)
-                        pools[moref] = {"moref": moref, "name": moref}
-                return pools
-            finally:
-                view.Destroy()
-        finally:
-            self._disconnect(conn)
+                pools[moref] = translate_resource_pool(moref, props)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Error parsing resource pool %s", moref, exc_info=True)
+                pools[moref] = {"moref": moref, "name": moref}
+        return pools
 
     def get_licenses(self) -> dict[str, dict[str, Any]]:
         """Fetch license information; silently filter evaluation/invalid at DEBUG level."""
-        conn = self._connect()
-        try:
-            content = conn.RetrieveContent()
-            lm = content.licenseManager
-            result: dict[str, dict[str, Any]] = {}
-
-            for lic in lm.licenses:
-                key = getattr(lic, "licenseKey", None) or ""
-                product_name = getattr(lic, "name", None)
-
-                # Skip invalid licenses (no WARNING spam)
-                if not product_name or str(product_name) == "None":
-                    _LOGGER.debug(
-                        "Skipping invalid license: key=%s, product=%s",
-                        key,
-                        product_name,
-                    )
-                    continue
-                if key == INVALID_LICENSE_KEY:
-                    _LOGGER.debug("Skipping evaluation license: key=%s", key)
-                    continue
-
-                total = getattr(lic, "total", 0) or 0
-                used = getattr(lic, "used", 0) or 0
-
-                # Parse properties for product name, expiration
-                product = str(product_name)
-                expiration_days: int | str = "never"
-                for prop in getattr(lic, "properties", []):
-                    if prop.key == "ProductName":
-                        product = str(prop.value)
-                    elif prop.key == "count_disabled":
-                        expiration_days = "never"
-                    elif prop.key == "expirationHours":
-                        with contextlib.suppress(TypeError, ValueError):
-                            expiration_days = round(int(prop.value) / 24)
-
-                # Determine status from expiration
-                if isinstance(expiration_days, int):
-                    if expiration_days > 30:
-                        status = "Ok"
-                    elif expiration_days >= 1:
-                        status = "Expiring Soon"
-                    else:
-                        status = "Expired"
-                else:
-                    status = "Ok"
-
-                result[key] = {
-                    "name": str(product_name),
-                    "key": key,
-                    "product": product,
-                    "status": status,
-                    "expiration_days": expiration_days,
-                    "total": total,
-                    "used": used,
-                    "free": max(0, total - used),
-                }
-
-            return result
-        finally:
-            self._disconnect(conn)
+        conn = self.ensure_poll_connection()
+        content = conn.RetrieveContent()
+        return translate_licenses(content.licenseManager.licenses)
 
     def get_alarms(self) -> dict[str, list[dict[str, Any]]]:
         """Fetch current triggered alarms for all hosts and VMs."""
@@ -657,11 +947,14 @@ class VSphereClient:
         return result
 
     def enumerate_inventory(self) -> dict[str, dict[str, Any]]:
-        """Lightweight inventory enumeration for config flow (morefs + names only)."""
+        """Lightweight inventory enumeration for config flow (morefs + names only).
+
+        Uses a dedicated session: config flow clients are throwaway and never
+        open the shared poll connection.
+        """
         conn = self._connect()
         try:
             result: dict[str, dict[str, Any]] = {}
-
             for obj_type, category in [
                 (vim.HostSystem, "host"),
                 (vim.VirtualMachine, "vm"),
@@ -669,24 +962,8 @@ class VSphereClient:
                 (vim.ClusterComputeResource, "cluster"),
                 (vim.ResourcePool, "resource_pool"),
             ]:
-                view = self._get_container_view(conn, [obj_type])
-                try:
-                    for obj in view.view:
-                        moref = obj._moId  # noqa: SLF001
-                        try:
-                            summary_config = getattr(getattr(obj, "summary", None), "config", None)
-                            if summary_config is not None and hasattr(summary_config, "name"):
-                                name = summary_config.name
-                            elif hasattr(obj, "name"):
-                                name = obj.name
-                            else:
-                                name = moref
-                        except Exception:  # noqa: BLE001
-                            name = moref
-                        result[moref] = {"moref": moref, "name": name, "type": category}
-                finally:
-                    view.Destroy()
-
+                for moref, props in self._bulk_retrieve(conn, obj_type, ["name"]).items():
+                    result[moref] = {"moref": moref, "name": props.get("name") or moref, "type": category}
             return result
         finally:
             self._disconnect(conn)
@@ -940,77 +1217,32 @@ class VSphereClient:
         """Fetch per-VM storage details (per-disk usage, policy compliance).
 
         Returns dict keyed by composite moref: "{vm_moref}_disk_{disk_key}"
-        or "{vm_moref}_storage_summary".
+        or "{vm_moref}_storage_summary".  Two bulk calls (VMs + datastore names).
         """
         conn = self.ensure_poll_connection()
-        content = conn.RetrieveContent()
-        container = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
+        raw = self._bulk_retrieve(
+            conn,
+            vim.VirtualMachine,
+            [
+                "config.template",
+                "summary.config.name",
+                "config.hardware.device",
+                "summary.storage.committed",
+                "summary.storage.uncommitted",
+                "summary.storage.unshared",
+            ],
+        )
+        ds_raw = self._bulk_retrieve(conn, vim.Datastore, ["name"])
+        ds_names = {m: p["name"] for m, p in ds_raw.items() if p.get("name")}
         storage: dict[str, dict[str, Any]] = {}
-        ds_names: dict[str, str] = {}
-        try:
-            for vm_obj in container.view:
-                vm_moref = str(vm_obj._moId)  # noqa: SLF001
-                try:
-                    if getattr(getattr(vm_obj, "config", None), "template", False):
-                        continue
-                    summary = vm_obj.summary
-                    vm_name = summary.config.name
-
-                    # Get virtual disks from config
-                    for device in vm_obj.config.hardware.device or []:
-                        if not isinstance(device, vim.vm.device.VirtualDisk):
-                            continue
-
-                        label = device.deviceInfo.label  # e.g., "Hard disk 1"
-                        if hasattr(device, "capacityInBytes") and device.capacityInBytes:
-                            capacity_gb = round(device.capacityInBytes / (1024**3), 2)
-                        elif hasattr(device, "capacityInKB") and device.capacityInKB:
-                            capacity_gb = round(device.capacityInKB / (1024**2), 2)
-                        else:
-                            capacity_gb = 0.0
-
-                        # Get backing file info
-                        backing = device.backing
-                        thin_provisioned = getattr(backing, "thinProvisioned", None)
-                        datastore_name = None
-                        if hasattr(backing, "datastore") and backing.datastore:
-                            ds = backing.datastore
-                            ds_key = str(ds._moId)  # noqa: SLF001
-                            if ds_key not in ds_names:
-                                ds_names[ds_key] = ds.name
-                            datastore_name = ds_names[ds_key]
-
-                        disk_key = f"{vm_moref}_disk_{device.key}"
-                        storage[disk_key] = {
-                            "moref": disk_key,
-                            "name": f"{vm_name} - {label}",
-                            "vm_moref": vm_moref,
-                            "vm_name": vm_name,
-                            "label": label,
-                            "capacity_gb": capacity_gb,
-                            "thin_provisioned": thin_provisioned,
-                            "datastore": datastore_name,
-                        }
-
-                    # Storage summary per VM
-                    if summary.storage:
-                        committed = summary.storage.committed
-                        uncommitted = summary.storage.uncommitted
-                        unshared = summary.storage.unshared
-                        storage[f"{vm_moref}_storage_summary"] = {
-                            "moref": f"{vm_moref}_storage_summary",
-                            "name": f"{vm_name} - Storage Summary",
-                            "vm_moref": vm_moref,
-                            "vm_name": vm_name,
-                            "label": "Storage Summary",
-                            "committed_gb": round(committed / (1024**3), 2) if committed else 0.0,
-                            "uncommitted_gb": round(uncommitted / (1024**3), 2) if uncommitted else 0.0,
-                            "unshared_gb": round(unshared / (1024**3), 2) if unshared else 0.0,
-                        }
-                except Exception:  # noqa: BLE001
-                    _LOGGER.debug("Failed to get storage details for VM %s", vm_moref, exc_info=True)
-        finally:
-            container.Destroy()
+        for vm_moref, props in raw.items():
+            try:
+                disks = [
+                    d for d in props.get("config.hardware.device") or [] if isinstance(d, vim.vm.device.VirtualDisk)
+                ]
+                storage.update(translate_vm_storage(vm_moref, props, disks, ds_names))
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Failed to get storage details for VM %s", vm_moref, exc_info=True)
         return storage
 
     # ------------------------------------------------------------------
@@ -1332,51 +1564,25 @@ class VSphereClient:
 
     def list_hosts(self) -> list[dict[str, Any]]:
         """Return a list of host summaries for service responses."""
-        conn = self._connect()
-        try:
-            view = self._get_container_view(conn, [vim.HostSystem])
-            try:
-                hosts: list[dict[str, Any]] = []
-                for host in view.view:
-                    moref = host._moId  # noqa: SLF001
-                    try:
-                        name = host.summary.config.name
-                        state = str(host.summary.runtime.powerState)
-                    except Exception:  # noqa: BLE001
-                        name = moref
-                        state = "unknown"
-                    hosts.append({"moref": moref, "name": name, "power_state": state})
-                return hosts
-            finally:
-                view.Destroy()
-        finally:
-            self._disconnect(conn)
+        conn = self.ensure_poll_connection()
+        raw = self._bulk_retrieve(conn, vim.HostSystem, ["summary.config.name", "summary.runtime.powerState"])
+        hosts: list[dict[str, Any]] = []
+        for moref, props in raw.items():
+            if "summary.config.name" in props and "summary.runtime.powerState" in props:
+                name = props["summary.config.name"]
+                state = str(props["summary.runtime.powerState"])
+            else:
+                name = moref
+                state = "unknown"
+            hosts.append({"moref": moref, "name": name, "power_state": state})
+        return hosts
 
     def list_power_policies(self, host_moref: str) -> list[dict[str, Any]]:
         """Return available power policies for a host (for service responses)."""
-        conn = self._connect()
-        try:
-            view = self._get_container_view(conn, [vim.HostSystem])
-            try:
-                for host in view.view:
-                    if host._moId != host_moref:  # noqa: SLF001
-                        continue
-                    capability = host.config.powerSystemCapability if host.config else None
-                    if not capability:
-                        return []
-                    return [
-                        {
-                            "key": p.key,
-                            "short_name": p.shortName,
-                            "name": p.name,
-                        }
-                        for p in (capability.availablePolicy or [])
-                    ]
-            finally:
-                view.Destroy()
-            return []
-        finally:
-            self._disconnect(conn)
+        conn = self.ensure_poll_connection()
+        raw = self._bulk_retrieve(conn, vim.HostSystem, ["config.powerSystemCapability.availablePolicy"])
+        policies = raw.get(host_moref, {}).get("config.powerSystemCapability.availablePolicy") or []
+        return [{"key": p.key, "short_name": p.shortName, "name": p.name} for p in policies]
 
     # ------------------------------------------------------------------
     # PropertyCollector support (EventListener)
@@ -1590,169 +1796,3 @@ class VSphereClient:
 
         filter_obj = pc.CreateFilter(filter_spec, partialUpdates=True)
         return pc, filter_obj, containers
-
-    # ------------------------------------------------------------------
-    # Parsing helpers
-    # ------------------------------------------------------------------
-
-    def _parse_host(self, host: Any, moref: str) -> dict[str, Any]:
-        """Extract host properties into a flat dict."""
-        data: dict[str, Any] = {"moref": moref}
-
-        try:
-            summary = host.summary
-            config = summary.config
-            runtime = summary.runtime
-            hardware = summary.hardware
-            quick = summary.quickStats
-
-            data["name"] = config.name if config else moref
-            data["state"] = str(runtime.powerState) if runtime else "unknown"
-            data["connection_state"] = str(runtime.connectionState) if runtime else "unknown"
-            data["maintenance_mode"] = bool(runtime.inMaintenanceMode) if runtime else False
-            data["version"] = config.product.version if config and config.product else ""
-            data["build"] = config.product.build if config and config.product else ""
-
-            # Capability
-            cap = host.capability
-            data["shutdown_supported"] = bool(cap.shutdownSupported) if cap else False
-
-            # Uptime
-            data["uptime_hours"] = round(quick.uptime / 3600, 2) if quick and quick.uptime else 0.0
-
-            # CPU
-            if hardware and hardware.cpuMhz and hardware.numCpuCores:
-                data["cpu_mhz"] = hardware.cpuMhz
-                data["cpu_cores"] = hardware.numCpuCores
-                data["cpu_total_ghz"] = round(hardware.cpuMhz * hardware.numCpuCores / 1000, 2)
-            else:
-                data["cpu_total_ghz"] = 0.0
-
-            if quick and quick.overallCpuUsage is not None:
-                data["cpu_usage_ghz"] = round(quick.overallCpuUsage / 1000, 2)
-            else:
-                data["cpu_usage_ghz"] = 0.0
-
-            # Memory
-            if hardware and hardware.memorySize:
-                data["mem_total_gb"] = round(hardware.memorySize / (1024**3), 2)
-            else:
-                data["mem_total_gb"] = 0.0
-
-            if quick and quick.overallMemoryUsage is not None:
-                data["mem_usage_gb"] = round(quick.overallMemoryUsage / 1024, 2)
-            else:
-                data["mem_usage_gb"] = 0.0
-
-            # vm_count is computed post-fetch from VM data (avoids N RPCs per host)
-            data["vm_count"] = 0
-
-            # Power policy
-            try:
-                ps_info = host.config.powerSystemInfo
-                data["power_policy"] = ps_info.currentPolicy.shortName if ps_info and ps_info.currentPolicy else ""
-            except Exception:  # noqa: BLE001
-                data["power_policy"] = ""
-
-            # Available power policies
-            try:
-                ps_cap = host.config.powerSystemCapability
-                data["available_power_policies"] = [
-                    {"key": p.key, "short_name": p.shortName, "name": p.name}
-                    for p in (ps_cap.availablePolicy if ps_cap else [])
-                ]
-            except Exception:  # noqa: BLE001
-                data["available_power_policies"] = []
-
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("Error parsing host %s", moref, exc_info=True)
-            data.setdefault("name", moref)
-
-        return data
-
-    def _parse_vm(self, vm_obj: Any, moref: str) -> dict[str, Any]:
-        """Extract VM properties into a flat dict."""
-        data: dict[str, Any] = {"moref": moref}
-
-        try:
-            summary = vm_obj.summary
-            cfg = summary.config
-            runtime = vm_obj.runtime
-            quick = summary.quickStats
-            guest_summary = summary.guest
-
-            data["name"] = cfg.name if cfg else moref
-            data["uuid"] = cfg.uuid if cfg else ""
-            data["cpu_count"] = cfg.numCpu if cfg else 0
-            data["memory_allocated_mb"] = cfg.memorySizeMB if cfg else 0
-
-            # Power state
-            raw_state = str(runtime.powerState) if runtime else "unknown"
-            data["power_state"] = raw_state
-            raw_conn = str(runtime.connectionState) if runtime else "unknown"
-            data["connection_state"] = raw_conn
-            data["state"] = derive_vm_state(raw_state, raw_conn)
-            data["status"] = str(summary.overallStatus) if summary.overallStatus else "gray"
-
-            # Storage
-            storage = summary.storage
-            data["used_space_gb"] = round(storage.committed / (1024**3), 2) if storage and storage.committed else 0.0
-
-            # Tools
-            data["tools_status"] = str(guest_summary.toolsStatus) if guest_summary else "toolsNotInstalled"
-
-            # Host info
-            if runtime and runtime.host:
-                data["host_moref"] = runtime.host._moId  # noqa: SLF001
-                try:
-                    data["host_name"] = runtime.host.name
-                except Exception:  # noqa: BLE001
-                    data["host_name"] = data["host_moref"]
-            else:
-                data["host_moref"] = ""
-                data["host_name"] = ""
-
-            # Store max CPU for push path derivation
-            if runtime and runtime.maxCpuUsage:
-                data["max_cpu_mhz"] = runtime.maxCpuUsage
-
-            # Running-only metrics
-            if raw_state == "poweredOn" and quick:
-                if quick.overallCpuUsage is not None and data.get("max_cpu_mhz"):
-                    data["cpu_use_pct"] = round(quick.overallCpuUsage / data["max_cpu_mhz"] * 100, 2)
-                else:
-                    data["cpu_use_pct"] = 0.0
-
-                data["memory_used_mb"] = quick.hostMemoryUsage or 0
-                data["memory_active_mb"] = quick.guestMemoryUsage or 0
-                data["uptime_hours"] = round(quick.uptimeSeconds / 3600, 2) if quick.uptimeSeconds else 0.0
-            else:
-                data["cpu_use_pct"] = 0.0
-                data["memory_used_mb"] = 0
-                data["memory_active_mb"] = 0
-                data["uptime_hours"] = 0.0
-
-            # Guest info
-            data["guest_ip"] = guest_summary.ipAddress if guest_summary and guest_summary.ipAddress else ""
-            data["guest_os"] = guest_summary.guestFullName if guest_summary and guest_summary.guestFullName else ""
-
-            # Snapshot count and list
-            snap_info = vm_obj.snapshot
-            if snap_info:
-                nodes = self._list_snapshot_nodes(snap_info.rootSnapshotList)
-                data["snapshot_count"] = len(nodes)
-                data["snapshots"] = []
-                for sn in nodes:
-                    with contextlib.suppress(Exception):
-                        data["snapshots"].append(
-                            {"name": sn.name, "moref": str(sn.snapshot._moId)}  # noqa: SLF001
-                        )
-            else:
-                data["snapshot_count"] = 0
-                data["snapshots"] = []
-
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("Error parsing VM %s", moref, exc_info=True)
-            data.setdefault("name", moref)
-
-        return data

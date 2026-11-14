@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import EntityCategory
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import CONF_CATEGORIES, DEFAULT_CATEGORIES, DOMAIN, HostAction
-from .entity import VSphereEntity
+from .const import CONF_CATEGORIES, CONF_ENTITY_FILTER, DEFAULT_CATEGORIES, HostAction
+from .entity import VSphereEntity, async_setup_discovery, iter_rows
 from .exceptions import VSphereConnectionError, VSphereOperationError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity import Entity
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-    from .coordinator import VSphereData
+    from .coordinator import VSphereConfigEntry, VSphereData, VSphereRuntimeData
+    from .entity import Spec
     from .permissions import PermissionResolver
     from .vsphere_client import VSphereClient
 
@@ -27,33 +32,34 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: VSphereConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up vSphere switches from a config entry."""
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: VSphereData = entry_data["coordinator"]
-    client: VSphereClient = entry_data["client"]
-    resolver: PermissionResolver = entry_data["resolver"]
+    rt = entry.runtime_data
     categories: dict[str, bool] = entry.options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
+    entity_filter: dict[str, Any] = entry.options.get(CONF_ENTITY_FILTER, {})
 
-    entities: list[SwitchEntity] = []
+    def specs() -> Iterator[Spec]:
+        for moref, row in iter_rows(rt.coordinator.data or {}, categories, entity_filter, "hosts"):
+            yield ("hosts", moref), partial(_build_host_switches, rt, entry, moref, row)
 
-    if categories.get("hosts"):
-        for moref, host_data in coordinator.data.get("hosts", {}).items():
-            name: str = host_data.get("name", moref)
-            entities.append(
-                HostMaintenanceSwitch(
-                    coordinator=coordinator,
-                    entry=entry,
-                    moref=moref,
-                    name=name,
-                    client=client,
-                    resolver=resolver,
-                )
-            )
+    async_setup_discovery(entry, rt.coordinator, async_add_entities, specs)
 
-    async_add_entities(entities)
+
+def _build_host_switches(
+    rt: VSphereRuntimeData, entry: VSphereConfigEntry, moref: str, row: dict[str, Any]
+) -> list[Entity]:
+    return [
+        HostMaintenanceSwitch(
+            coordinator=rt.coordinator,
+            entry=entry,
+            moref=moref,
+            name=row.get("name", moref),
+            client=rt.client,
+            resolver=rt.resolver,
+        )
+    ]
 
 
 class HostMaintenanceSwitch(VSphereEntity, SwitchEntity):

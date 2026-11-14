@@ -6,24 +6,22 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.diagnostics import async_redact_data
 
-from .const import DOMAIN
-
 if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
+
+    from .coordinator import VSphereConfigEntry
 
 REDACT_KEYS = {"password", "username", "host", "license_key", "key", "guest_ip", "ssl_ca_path", "mac", "uuid"}
 
 
-async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
+async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: VSphereConfigEntry) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    data = hass.data[DOMAIN].get(entry.entry_id, {})
-    coordinator = data.get("coordinator")
+    coordinator = entry.runtime_data.coordinator
 
     return {
         "config_entry": async_redact_data(entry.as_dict(), REDACT_KEYS),
         "coordinator_data": async_redact_data(
-            coordinator.data if coordinator else {},
+            coordinator.data,
             REDACT_KEYS,
         ),
     }

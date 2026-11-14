@@ -8,7 +8,11 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator, Mapping
+
     from homeassistant.config_entries import ConfigEntry
+    from homeassistant.helpers.entity import Entity
+    from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import VSphereData
@@ -36,6 +40,121 @@ def is_vm_disconnected(coordinator_data: dict[str, Any], vm_moref: str) -> bool:
         None,
         "poweredOn",
     )
+
+
+# ---------------------------------------------------------------------------
+# Dynamic entity discovery (pure, unit-testable helpers)
+# ---------------------------------------------------------------------------
+
+# A discovery key identifies one unit of entity creation, e.g. ("vms", "vm-12").
+SpecKey = tuple[str, str]
+# (key, lazy factory) — the factory is only called for keys not yet known.
+Spec = tuple[SpecKey, "Callable[[], list[Entity]]"]
+
+
+def row_allowed(entity_filter: Mapping[str, Any], data_key: str, moref: str) -> bool:
+    """Apply the user's entity filter (``mode: select`` restricts to listed morefs)."""
+    cfg = entity_filter.get(data_key) or {}
+    if cfg.get("mode", "all") != "select":
+        return True
+    return moref in cfg.get("morefs", ())
+
+
+def iter_rows(
+    data: Mapping[str, Any],
+    categories: Mapping[str, bool],
+    entity_filter: Mapping[str, Any],
+    category: str,
+    data_key: str | None = None,
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield (moref, row) of ``data_key`` rows when ``category`` is enabled and the filter allows them."""
+    if not categories.get(category):
+        return
+    key = data_key or category
+    for moref, row in (data.get(key) or {}).items():
+        if row_allowed(entity_filter, key, moref):
+            yield moref, row
+
+
+def diff_keys(known: frozenset[SpecKey], current: frozenset[SpecKey]) -> tuple[frozenset[SpecKey], frozenset[SpecKey]]:
+    """Return (added, removed) discovery keys."""
+    return current - known, known - current
+
+
+def valid_morefs(data: Mapping[str, Any], categories: Mapping[str, bool], entry_id: str) -> frozenset[str]:
+    """Morefs (plus the root device id) that should currently own entities."""
+    valid: set[str] = {entry_id}
+    for cat in ("hosts", "vms", "datastores", "clusters", "resource_pools", "licenses", "storage_advanced"):
+        if categories.get(cat):
+            valid.update(data.get(cat) or ())
+    if categories.get("network"):
+        valid.update(data.get("networks") or ())
+    if categories.get("events_alarms"):
+        # Alarm entities live on host/VM morefs regardless of whether those categories are enabled
+        valid.update(data.get("hosts") or ())
+        valid.update(data.get("vms") or ())
+    return frozenset(valid)
+
+
+def is_stale_unique_id(unique_id: str, entry_id: str, valid: Iterable[str]) -> bool:
+    """True if ``unique_id`` (``{entry_id}_{moref}_{key}``) references a moref not in ``valid``."""
+    prefix = f"{entry_id}_"
+    if not unique_id.startswith(prefix):
+        return False
+    remainder = unique_id[len(prefix) :]
+    return not any(remainder == m or remainder.startswith(m + "_") for m in valid)
+
+
+class EntityDiscovery:
+    """Adds entities for newly appearing objects; runs as a coordinator listener.
+
+    ``specs_fn`` lazily yields ``(key, factory)`` for every object that should have
+    entities right now. Entity construction only happens for keys not seen before,
+    so an unchanged inventory costs one key-set comparison per coordinator update.
+    """
+
+    def __init__(self, specs_fn: Callable[[], Iterable[Spec]], add_entities: AddEntitiesCallback) -> None:
+        """Initialize."""
+        self._specs_fn = specs_fn
+        self._add_entities = add_entities
+        self._known: frozenset[SpecKey] = frozenset()
+
+    def run(self) -> None:
+        """Add entities for keys never seen before.
+
+        Keys are never dropped because a row is transiently absent (a partial
+        fetch or powered-off host must not cause duplicate adds). Only
+        ``forget`` — called on genuine deletions — allows re-creation.
+        """
+        specs = list(self._specs_fn())
+        current = frozenset(key for key, _ in specs)
+        added = current - self._known
+        if not added:
+            return
+        self._known |= added
+        entities: list[Entity] = []
+        for key, factory in specs:
+            if key in added:
+                entities.extend(factory())
+        if entities:
+            self._add_entities(entities)
+
+    def forget(self, moref: str) -> None:
+        """Discard all keys belonging to ``moref`` so it can be re-created later."""
+        self._known = frozenset(k for k in self._known if k[1] != moref)
+
+
+def async_setup_discovery(
+    entry: ConfigEntry,
+    coordinator: VSphereData,
+    add_entities: AddEntitiesCallback,
+    specs_fn: Callable[[], Iterable[Spec]],
+) -> None:
+    """Run discovery once now and again on every coordinator update."""
+    discovery = EntityDiscovery(specs_fn, add_entities)
+    entry.runtime_data.discoveries.append(discovery)
+    discovery.run()
+    entry.async_on_unload(coordinator.async_add_listener(discovery.run))
 
 
 class VSphereEntity(CoordinatorEntity[VSphereData]):

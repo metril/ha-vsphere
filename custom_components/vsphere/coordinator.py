@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -22,12 +23,32 @@ from .const import (
 from .exceptions import VSphereAuthError, VSphereConnectionError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from homeassistant.config_entries import ConfigEntry
 
+    from .entity import EntityDiscovery
+    from .event_listener import VSphereEventListener
     from .permissions import PermissionResolver
     from .vsphere_client import VSphereClient
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class VSphereRuntimeData:
+    """Runtime objects of a loaded config entry (stored in ``entry.runtime_data``)."""
+
+    client: VSphereClient
+    coordinator: VSphereData
+    event_listener: VSphereEventListener
+    resolver: PermissionResolver
+    perf_coordinator: VSpherePerfCoordinator | None = None
+    inventory_coordinator: VSphereInventoryCoordinator | None = None
+    discoveries: list[EntityDiscovery] = field(default_factory=list)
+
+
+type VSphereConfigEntry = ConfigEntry[VSphereRuntimeData]
 
 
 class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
@@ -55,6 +76,7 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         self.entry = entry
         self.client = client
         self.resolver = resolver
+        self._removal_callbacks: list[Callable[[str, str], None]] = []
         self._data: dict[str, Any] = {
             "hosts": {},
             "vms": {},
@@ -131,7 +153,18 @@ class VSphereData(DataUpdateCoordinator[dict[str, Any]]):
         """Remove an object that no longer exists."""
         if category in self._data:
             self._data[category].pop(moref, None)
+        for cb in list(self._removal_callbacks):
+            try:
+                cb(category, moref)
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Removal callback failed for %s/%s", category, moref)
         self.async_set_updated_data(self._data)
+
+    @callback
+    def async_add_removal_listener(self, cb: Callable[[str, str], None]) -> Callable[[], None]:
+        """Register a callback invoked on genuine push deletions; returns an unsubscribe."""
+        self._removal_callbacks.append(cb)
+        return lambda: self._removal_callbacks.remove(cb) if cb in self._removal_callbacks else None
 
     @callback
     def async_set_initial_data(self, data: dict[str, Any]) -> None:

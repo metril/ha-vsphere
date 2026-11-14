@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
@@ -21,6 +22,9 @@ from .const import (
     VmAction,
 )
 from .exceptions import VSphereConnectionError, VSphereOperationError
+
+if TYPE_CHECKING:
+    from .coordinator import VSphereRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -175,18 +179,17 @@ def _resolve_device(hass: HomeAssistant, device_id: str, *, allow_root: bool = F
             "This service must target a specific host or VM device, not the root vCenter/ESXi device"
         )
 
-    domain_data: dict[str, Any] = hass.data.get(DOMAIN, {})
-    entry_data: dict[str, Any] = domain_data.get(entry_id, {})
-    if not entry_data:
+    rt = _runtime_data(hass, entry_id)
+    return rt.client, rt.resolver, entry_id, moref or ""
+
+
+def _runtime_data(hass: HomeAssistant, entry_id: str) -> VSphereRuntimeData:
+    """Return runtime data of a loaded config entry or raise."""
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None or entry.domain != DOMAIN or entry.state is not ConfigEntryState.LOADED:
         raise HomeAssistantError(f"vSphere config entry '{entry_id}' is not loaded")
-
-    client = entry_data.get("client")
-    resolver = entry_data.get("resolver")
-
-    if client is None:
-        raise HomeAssistantError(f"vSphere client not found for config entry '{entry_id}'")
-
-    return client, resolver, entry_id, moref or ""
+    rt: VSphereRuntimeData = entry.runtime_data
+    return rt
 
 
 # ---------------------------------------------------------------------------
@@ -349,10 +352,7 @@ async def _handle_remove_snapshots(hass: HomeAssistant, call: ServiceCall) -> No
     snapshot_names: list[str] = call.data[ATTR_SNAPSHOTS]
 
     # Get snapshot data from coordinator
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id, {})
-    coordinator = entry_data.get("coordinator")
-    if coordinator is None:
-        raise HomeAssistantError(f"vSphere config entry '{entry_id}' is not loaded")
+    coordinator = _runtime_data(hass, entry_id).coordinator
     vm_data = (coordinator.data or {}).get("vms", {}).get(vm_moref, {})
     snapshots: list[dict[str, str]] = vm_data.get("snapshots", [])
 

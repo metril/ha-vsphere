@@ -1,7 +1,7 @@
 # ha-vsphere
 
 Home Assistant custom integration for VMware vSphere monitoring and control.
-**Version:** 3.10.0 | **Domain:** `vsphere` | **IoT Class:** `local_push`
+**Version:** 3.11.0 | **Domain:** `vsphere` | **IoT Class:** `local_push`
 
 ## Project Structure
 
@@ -31,7 +31,7 @@ custom_components/vsphere/
 
 - `docs/superpowers/` — Design specs and plans (local only, gitignored)
 - `.github/workflows/` — `validate` (hassfest + HACS), `ci` (ruff + pytest, mypy advisory), `release` (automatic on merge to main when the manifest version is new: tags `v<version>` + GitHub release)
-- `tests/` — 128 unit tests (run in parallel via pytest-xdist). Pure-unit only: `conftest.py` mocks every `homeassistant.*`
+- `tests/` — 158 unit tests (run in parallel via pytest-xdist). Pure-unit only: `conftest.py` mocks every `homeassistant.*`
   module, so classes subclassing `CoordinatorEntity`/`DataUpdateCoordinator` resolve to
   non-functional mocks and **cannot be tested**. Keep branching logic in module-level
   functions (`derive_vm_state`, `is_vm_disconnected`, `_duration_to_seconds`) so it stays testable.
@@ -44,7 +44,7 @@ uv sync --all-extras         # adds the `typing` extra (Home Assistant) for mypy
 uv run ruff check custom_components/vsphere/ tests/
 uv run ruff format custom_components/vsphere/ tests/
 uv run pytest tests/ -v
-uv run mypy custom_components/vsphere/   # advisory: 22 pre-existing errors
+uv run mypy custom_components/vsphere/   # advisory: 17 pre-existing errors
 ```
 
 ## Key Conventions
@@ -70,6 +70,12 @@ uv run mypy custom_components/vsphere/   # advisory: 22 pre-existing errors
 - **VM reachability:** `runtime.connectionState` is authoritative; `powerState` goes stale when the host
   drops. `is_vm_disconnected()` also cascades to the parent host and is evaluated at read time, because
   a host row changing does not recompute the VM rows pointing at it.
+- **Runtime state** lives in `entry.runtime_data` (`VSphereRuntimeData`, `VSphereConfigEntry`); services register once in `async_setup`
+- **Bulk fetch:** all `get_*` use the shared poll connection + one `RetrievePropertiesEx` per type via `_bulk_retrieve`; pure
+  `translate_*` functions map `{path: value}` → rows. A call-level fault raises (never return a partial inventory as complete)
+- **Dynamic entities:** platforms yield `(key, factory)` specs to `EntityDiscovery` (entity.py); `_known` only grows
+- **Registry removal at runtime only on a push `leave`** for top-level objects (`_async_remove_object_entities`); never
+  because a row is absent from a poll. `_async_cleanup_stale_entities` runs only at setup
 - **ContainerView cleanup:** tracked and destroyed on stop/reconnect
 - **Never commit `docs/`** — specs and plans are local working files
 
